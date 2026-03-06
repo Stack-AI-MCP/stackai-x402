@@ -191,11 +191,11 @@ describe('Step 4 — RECIPIENT_MISMATCH', () => {
     expect(err.code).toBe('RECIPIENT_MISMATCH')
   })
 
-  it('throws RECIPIENT_MISMATCH when recipient is correct type but address does not match', async () => {
-    // Second RECIPIENT_MISMATCH test: confirms the error is thrown regardless of
-    // which code path triggered it (STX and SIP-010 share the same error code)
+  it('throws RECIPIENT_MISMATCH on a SIP-010 ContractCall when recipient address does not match', async () => {
+    // Exercises the ContractCall path in extractRecipient (args[2] lookup),
+    // distinct from the STX TokenTransfer path tested above.
     const err = await verifyPayment(
-      baseParams({ expectedRecipient: 'SP000000000000000000000000000WRONG' }),
+      baseParams({ header: sbtcHeader, expectedRecipient: 'SP000000000000000000000000000WRONG' }),
     ).catch((e) => e)
     expect(err).toBeInstanceOf(PaymentVerificationError)
     expect(err.code).toBe('RECIPIENT_MISMATCH')

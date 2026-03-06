@@ -73,8 +73,15 @@ function extractAmount(tx: StacksTransactionWire): bigint {
     return (tx.payload as TokenTransferPayloadWire).amount
   }
   if (tx.payload.payloadType === PayloadType.ContractCall) {
-    const amountCV = (tx.payload as ContractCallPayload).functionArgs[0] as UIntCV
-    return amountCV.value as bigint
+    const args = (tx.payload as ContractCallPayload).functionArgs
+    // SIP-010 transfer: [amount, sender, recipient, memo] — amount is index 0
+    if (args.length < 1) {
+      throw new Error(`ContractCall has no arguments; expected ≥1 for a SIP-010 transfer`)
+    }
+    if (args[0].type !== ClarityType.UInt) {
+      throw new Error(`Expected UInt for SIP-010 amount, got CV type ${args[0].type}`)
+    }
+    return (args[0] as UIntCV).value as bigint
   }
   throw new Error(`Unsupported payload type: ${tx.payload.payloadType}`)
 }

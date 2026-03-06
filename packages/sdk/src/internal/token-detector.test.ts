@@ -1,8 +1,16 @@
 import { describe, it, expect, beforeAll } from 'vitest'
-import { randomPrivateKey, getAddressFromPrivateKey } from '@stacks/transactions'
+import {
+  randomPrivateKey,
+  getAddressFromPrivateKey,
+  makeContractCall,
+  serializeTransaction,
+  uintCV,
+  standardPrincipalCV,
+  noneCV,
+  PostConditionMode,
+} from '@stacks/transactions'
 import { buildPaymentTransaction } from './payment-builder.js'
 import { detectPaymentToken } from './token-detector.js'
-import { TOKEN_REGISTRY } from './token-registry.js'
 
 // ─── Test fixtures ────────────────────────────────────────────────────────────
 
@@ -16,9 +24,11 @@ let stxTestnetHex: string
 let sbtcMainnetHex: string
 let sbtcTestnetHex: string
 let usdcxMainnetHex: string
+/** ContractCall to a contract address that is NOT in TOKEN_REGISTRY */
+let unknownContractHex: string
 
 beforeAll(async () => {
-  ;[stxMainnetHex, stxTestnetHex, sbtcMainnetHex, sbtcTestnetHex, usdcxMainnetHex] =
+  ;[stxMainnetHex, stxTestnetHex, sbtcMainnetHex, sbtcTestnetHex, usdcxMainnetHex, unknownContractHex] =
     await Promise.all([
       buildPaymentTransaction({
         senderKey: SENDER_KEY,
@@ -55,6 +65,25 @@ beforeAll(async () => {
         tokenType: 'USDCx',
         network: 'mainnet',
       }),
+      // Build a ContractCall to a contract that is NOT in TOKEN_REGISTRY.
+      // Uses MAINNET_RECIPIENT as the contractAddress principal (valid c32 format)
+      // and an arbitrary contract name that will never match any registered token.
+      makeContractCall({
+        contractAddress: MAINNET_RECIPIENT,
+        contractName: 'not-in-registry',
+        functionName: 'transfer',
+        functionArgs: [
+          uintCV(AMOUNT),
+          standardPrincipalCV(MAINNET_RECIPIENT),
+          standardPrincipalCV(MAINNET_RECIPIENT),
+          noneCV(),
+        ],
+        fee: 0n,
+        sponsored: true,
+        senderKey: SENDER_KEY,
+        network: 'mainnet',
+        postConditionMode: PostConditionMode.Allow,
+      }).then((tx) => serializeTransaction(tx).toLowerCase()),
     ])
 })
 
@@ -80,18 +109,6 @@ describe('detectPaymentToken — sBTC', () => {
   it('detects sBTC from a testnet ContractCall transaction', () => {
     expect(detectPaymentToken(sbtcTestnetHex, 'testnet')).toBe('sBTC')
   })
-
-  it('does NOT detect sBTC mainnet tx as sBTC on testnet (contract address mismatch)', () => {
-    // If mainnet and testnet share the same contract address this test becomes a no-op,
-    // but it documents the expected behaviour for when they differ.
-    const mainnetAddr = TOKEN_REGISTRY.sBTC.mainnet.contractAddress
-    const testnetAddr = TOKEN_REGISTRY.sBTC.testnet.contractAddress
-    if (mainnetAddr === testnetAddr) return // same address on both — skip
-
-    expect(() => detectPaymentToken(sbtcMainnetHex, 'testnet')).toThrow(
-      'Unrecognized contract address',
-    )
-  })
 })
 
 // ─── USDCx (ContractCall payload) ────────────────────────────────────────────
@@ -105,24 +122,10 @@ describe('detectPaymentToken — USDCx', () => {
 // ─── Error cases ──────────────────────────────────────────────────────────────
 
 describe('detectPaymentToken — error cases', () => {
-  it('throws on unrecognized contract address', () => {
-    // sBTC mainnet tx evaluated against testnet registry (different addresses)
-    // or any future unknown contract call.
-    // We test this by evaluating a known SIP-010 tx against the wrong network
-    // (only meaningful if addresses differ — otherwise use a hand-crafted scenario).
-    const mainnetAddr = TOKEN_REGISTRY.sBTC.mainnet.contractAddress
-    const testnetAddr = TOKEN_REGISTRY.sBTC.testnet.contractAddress
-
-    if (mainnetAddr !== testnetAddr) {
-      expect(() => detectPaymentToken(sbtcMainnetHex, 'testnet')).toThrow(
-        'Unrecognized contract address in payment transaction',
-      )
-    } else {
-      // If addresses match, construct a known-bad scenario: USDCx tx vs sBTC registry
-      // — we can't produce a ContractCall to a *completely* unknown contract without
-      // hand-crafting bytes, so we rely on the other error-path tests instead.
-      expect(true).toBe(true) // document that addresses are identical on both networks
-    }
+  it('throws on unrecognized contract address (contract not in TOKEN_REGISTRY)', () => {
+    expect(() => detectPaymentToken(unknownContractHex, 'mainnet')).toThrow(
+      'Unrecognized contract address in payment transaction',
+    )
   })
 
   it('throws on invalid hex input (deserialization fails)', () => {

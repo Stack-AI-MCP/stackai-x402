@@ -330,6 +330,54 @@ describe('PATCH /api/v1/servers/:serverId', () => {
     expect(patchSetCall).toBeDefined()
     expect(patchSetCall?.[2]).toBe('KEEPTTL')
   })
+
+  it('returns 400 when serverId is not a valid UUID', async () => {
+    const patchRes = await app.request('/api/v1/servers/not-a-uuid', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', 'X-Owner-Key': ownerKey },
+      body: JSON.stringify({ toolPricing: {} }),
+    })
+
+    expect(patchRes.status).toBe(400)
+    const body = await patchRes.json() as Record<string, string>
+    expect(body.code).toBe('INVALID_REQUEST')
+  })
+
+  it('returns 400 when body is not valid JSON', async () => {
+    const patchRes = await app.request(`/api/v1/servers/${serverId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', 'X-Owner-Key': ownerKey },
+      body: 'not-json',
+    })
+
+    expect(patchRes.status).toBe(400)
+    const body = await patchRes.json() as Record<string, string>
+    expect(body.code).toBe('INVALID_REQUEST')
+  })
+
+  it('returns 400 when PATCH body contains unknown fields (.strict())', async () => {
+    const patchRes = await app.request(`/api/v1/servers/${serverId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', 'X-Owner-Key': ownerKey },
+      body: JSON.stringify({ name: 'new name' }),
+    })
+
+    expect(patchRes.status).toBe(400)
+    const body = await patchRes.json() as Record<string, string>
+    expect(body.code).toBe('INVALID_REQUEST')
+  })
+
+  it('returns 400 when recipientAddress in PATCH has invalid format', async () => {
+    const patchRes = await app.request(`/api/v1/servers/${serverId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', 'X-Owner-Key': ownerKey },
+      body: JSON.stringify({ recipientAddress: '0x1234' }),
+    })
+
+    expect(patchRes.status).toBe(400)
+    const body = await patchRes.json() as Record<string, string>
+    expect(body.code).toBe('INVALID_REQUEST')
+  })
 })
 
 // ─── Agent Card: GET /.well-known/agent.json ──────────────────────────────────

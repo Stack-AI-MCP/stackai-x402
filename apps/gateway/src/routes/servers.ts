@@ -1,3 +1,4 @@
+import { timingSafeEqual } from 'node:crypto'
 import { Hono } from 'hono'
 import { z } from 'zod'
 import { registerServer } from '../services/registration.service.js'
@@ -6,6 +7,7 @@ import type { AppEnv } from '../app.js'
 import { encrypt } from 'stackai-x402/internal'
 
 const STACKS_ADDRESS_RE = /^S[TPMN][0-9A-Z]{38,}$/
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 const RegisterBodySchema = z.object({
   url: z.string().url('url must be a valid URL'),
@@ -25,7 +27,7 @@ const RegisterBodySchema = z.object({
 })
 
 const PatchBodySchema = z.object({
-  toolPricing: z.record(z.string(), z.object({ price: z.number() })).optional(),
+  toolPricing: z.record(z.string(), z.object({ price: z.number().nonnegative() })).optional(),
   acceptedTokens: z.array(z.enum(['STX', 'sBTC', 'USDCx'])).optional(),
   recipientAddress: z
     .string()
@@ -34,7 +36,7 @@ const PatchBodySchema = z.object({
   telegramChatId: z.string().optional(),
   webhookUrl: z.string().url().optional(),
   upstreamAuth: z.string().optional(),
-})
+}).strict()
 
 export const serversRouter = new Hono<AppEnv>()
 
@@ -71,6 +73,11 @@ serversRouter.post('/', async (c) => {
 
 serversRouter.patch('/:serverId', async (c) => {
   const serverId = c.req.param('serverId')
+
+  if (!UUID_RE.test(serverId)) {
+    return c.json({ error: 'Invalid server ID format', code: 'INVALID_REQUEST' }, 400)
+  }
+
   const ownerKey = c.req.header('X-Owner-Key')
 
   if (!ownerKey) {
@@ -96,9 +103,13 @@ serversRouter.patch('/:serverId', async (c) => {
   const redis = c.get('redis')
   const encryptionKey = c.get('encryptionKey')
 
-  // Auth check — compare header to stored ownerKey before touching the config
+  // Auth check — timing-safe comparison to prevent brute-force via response timing
   const storedOwnerKey = await redis.get(`server:${serverId}:ownerKey`)
-  if (storedOwnerKey === null || storedOwnerKey !== ownerKey) {
+  if (
+    storedOwnerKey === null ||
+    storedOwnerKey.length !== ownerKey.length ||
+    !timingSafeEqual(Buffer.from(storedOwnerKey), Buffer.from(ownerKey))
+  ) {
     return c.json({ error: 'Unauthorized', code: 'UNAUTHORIZED' }, 403)
   }
 
@@ -137,7 +148,7 @@ serversRouter.patch('/:serverId', async (c) => {
   await redis.set(`server:${serverId}:config`, JSON.stringify(updatedConfig), 'KEEPTTL')
 
   // Strip sensitive fields from response (encryptedAuth is the stored form of upstreamAuth)
-  const { encryptedAuth: _enc, ...safeConfig } = updatedConfig
-  void _enc
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { encryptedAuth: _, ...safeConfig } = updatedConfig
   return c.json(safeConfig, 200)
 })

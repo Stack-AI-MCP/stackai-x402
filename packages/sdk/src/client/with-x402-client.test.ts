@@ -55,6 +55,11 @@ describe('createAgentClient', () => {
     originalFetch = globalThis.fetch
   })
 
+  beforeEach(() => {
+    // Reset between tests so a mid-test failure doesn't pollute the next test
+    globalThis.fetch = originalFetch
+  })
+
   afterAll(() => {
     globalThis.fetch = originalFetch
   })
@@ -257,6 +262,34 @@ describe('createAgentClient', () => {
     await client.callTool('srv', 'tools/call')
     const url = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0][0]
     expect(url).toBe('https://gateway.example.com/api/v1/proxy/srv')
+  })
+
+  it('does not loop when retry also returns 402', async () => {
+    // Gateway returns 402 on both the initial request AND the paid retry
+    globalThis.fetch = createRoutingFetch(async () => {
+      return new Response('Payment Required', {
+        status: 402,
+        headers: { 'payment-required': paymentRequiredB64 },
+      })
+    })
+
+    const client = createAgentClient({
+      signingCredentials: { privateKey: senderKey, address: senderAddress },
+      gatewayBaseUrl: GATEWAY_URL,
+      network: 'testnet',
+    })
+
+    // Should throw on the retry 402, NOT loop infinitely
+    await expect(client.callTool('srv', 'tools/call')).rejects.toThrow(
+      'Paid tool call failed with HTTP 402',
+    )
+
+    // Exactly 2 gateway calls: initial + one retry (no loop)
+    const allCalls = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls
+    const gatewayCalls = allCalls.filter(
+      (call) => (call[0] as string).includes('gateway.example.com'),
+    )
+    expect(gatewayCalls).toHaveLength(2)
   })
 
   it('payment-signature header is valid base64 of a Stacks tx', async () => {

@@ -172,6 +172,47 @@ describe('wrapFetch', () => {
     expect(innerFetch).toHaveBeenCalledTimes(2)
   })
 
+  it('does not loop when retry also returns 402', async () => {
+    // Both initial and retry return 402
+    const innerFetch = vi.fn().mockResolvedValue(
+      new Response('', {
+        status: 402,
+        headers: { 'payment-required': paymentRequiredB64 },
+      }),
+    )
+
+    const wrappedFetch = wrapFetch(innerFetch, wrapOptions)
+    const res = await wrappedFetch('https://api.example.com/data')
+
+    // Returns the retry 402 response, does NOT loop
+    expect(res.status).toBe(402)
+    expect(innerFetch).toHaveBeenCalledTimes(2) // initial + one retry, no more
+  })
+
+  it('passes through 402 when buildPaymentTransaction fails', async () => {
+    // Valid 402 header but with an invalid recipient that will cause
+    // buildPaymentTransaction to throw
+    const badRecipientPayment: PaymentRequiredV2 = {
+      ...paymentRequired,
+      payTo: '0xINVALID_NOT_A_STACKS_ADDRESS',
+    }
+    const b64 = Buffer.from(JSON.stringify(badRecipientPayment)).toString('base64')
+
+    const innerFetch = vi.fn().mockResolvedValue(
+      new Response('', {
+        status: 402,
+        headers: { 'payment-required': b64 },
+      }),
+    )
+
+    const wrappedFetch = wrapFetch(innerFetch, wrapOptions)
+    const res = await wrappedFetch('https://api.example.com/data')
+
+    // Should pass through the original 402, not throw
+    expect(res.status).toBe(402)
+    expect(innerFetch).toHaveBeenCalledTimes(1) // No retry attempted
+  })
+
   it('passes through 402 when no supported tokens available', async () => {
     const unsupportedPayment: PaymentRequiredV2 = {
       ...paymentRequired,

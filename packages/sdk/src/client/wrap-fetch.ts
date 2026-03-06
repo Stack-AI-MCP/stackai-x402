@@ -37,6 +37,13 @@ export interface AxiosLike {
  * the wrapper builds and signs a payment transaction locally, then
  * retries the request with the `payment-signature` and `payment-id` headers.
  *
+ * **Error philosophy — pass-through on failure:**
+ * Unlike `createAgentClient` (which throws on every failure), `wrapFetch`
+ * silently returns the original 402 response when payment cannot be completed
+ * (missing header, undecodable header, unsupported tokens, or transaction
+ * build failure). This is intentional: as a transparent HTTP wrapper, throwing
+ * would break arbitrary consumer code that may have its own 402 handling.
+ *
  * @returns A new fetch function with the same signature as the original.
  */
 export function wrapFetch(fetchFn: FetchFn, options: WrapFetchOptions): FetchFn {
@@ -69,14 +76,20 @@ export function wrapFetch(fetchFn: FetchFn, options: WrapFetchOptions): FetchFn 
 
     const amount = BigInt(paymentRequired.price[selectedToken])
 
-    const txHex = await buildPaymentTransaction({
-      senderKey: signingCredentials.privateKey,
-      recipient: paymentRequired.payTo,
-      amount,
-      tokenType: selectedToken,
-      network,
-    })
+    let txHex: string
+    try {
+      txHex = await buildPaymentTransaction({
+        senderKey: signingCredentials.privateKey,
+        recipient: paymentRequired.payTo,
+        amount,
+        tokenType: selectedToken,
+        network,
+      })
+    } catch {
+      return res // Payment build failed — pass through original 402
+    }
 
+    // hex → bytes → base64 (the wire format for payment-signature)
     const paymentSignature = Buffer.from(txHex, 'hex').toString('base64')
 
     // Merge payment headers into the original request headers

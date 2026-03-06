@@ -1,0 +1,18 @@
+{
+  "name": "stackai-x402-root",
+  "private": true,
+  "scripts": {
+    "build": "turbo run build",
+    "test": "turbo run test",
+    "dev": "turbo run dev",
+    "lint": "turbo run lint"
+  },
+  "devDependencies": {
+    "turbo": "^2.8.13",
+    "typescript": "^5.9.3"
+  },
+  "packageManager": "pnpm@10.17.1",
+  "engines": {
+    "node": ">=18"
+  }
+}

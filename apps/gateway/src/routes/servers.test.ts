@@ -225,6 +225,113 @@ describe('POST /api/v1/servers', () => {
   })
 })
 
+// ─── Update: PATCH /api/v1/servers/:serverId ─────────────────────────────────
+
+describe('PATCH /api/v1/servers/:serverId', () => {
+  let redis: ReturnType<typeof makeRedis>
+  let app: ReturnType<typeof createApp>
+  let serverId: string
+  let ownerKey: string
+
+  beforeEach(async () => {
+    redis = makeRedis()
+    app = createApp({
+      redis,
+      encryptionKey: ENCRYPTION_KEY,
+      network: 'mainnet',
+      relayUrl: 'https://relay.example.com/broadcast',
+      tokenPrices: { STX: 3.0, sBTC: 100_000.0, USDCx: 1.0 },
+    })
+    vi.unstubAllGlobals()
+
+    // Register a test server for each test to mutate
+    mockMcpTools([])
+    const regRes = await app.request('/api/v1/servers', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(VALID_BODY),
+    })
+    const regBody = await regRes.json() as Record<string, string>
+    serverId = regBody.serverId
+    ownerKey = regBody.ownerKey
+    vi.unstubAllGlobals()
+  })
+
+  it('partial update: changing toolPricing does not affect other fields', async () => {
+    const newPricing = { 'my-tool': { price: 999 } }
+
+    const patchRes = await app.request(`/api/v1/servers/${serverId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', 'X-Owner-Key': ownerKey },
+      body: JSON.stringify({ toolPricing: newPricing }),
+    })
+
+    expect(patchRes.status).toBe(200)
+    const body = await patchRes.json() as Record<string, unknown>
+    expect(body.toolPricing).toEqual(newPricing)
+    expect(body.recipientAddress).toBe(VALID_BODY.recipientAddress)
+    expect(body).not.toHaveProperty('encryptedAuth')
+    expect(body).not.toHaveProperty('ownerKey')
+  })
+
+  it('returns 403 UNAUTHORIZED when X-Owner-Key does not match', async () => {
+    const patchRes = await app.request(`/api/v1/servers/${serverId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', 'X-Owner-Key': 'a'.repeat(64) },
+      body: JSON.stringify({ toolPricing: {} }),
+    })
+
+    expect(patchRes.status).toBe(403)
+    const body = await patchRes.json() as Record<string, string>
+    expect(body.code).toBe('UNAUTHORIZED')
+    expect(body.error).toBe('Unauthorized')
+  })
+
+  it('returns 403 UNAUTHORIZED when X-Owner-Key header is missing', async () => {
+    const patchRes = await app.request(`/api/v1/servers/${serverId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ toolPricing: {} }),
+    })
+
+    expect(patchRes.status).toBe(403)
+    const body = await patchRes.json() as Record<string, string>
+    expect(body.code).toBe('UNAUTHORIZED')
+  })
+
+  it('re-encrypts upstreamAuth when included in PATCH — plaintext never stored', async () => {
+    const NEW_SECRET = 'new-bearer-token-xyz'
+
+    await app.request(`/api/v1/servers/${serverId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', 'X-Owner-Key': ownerKey },
+      body: JSON.stringify({ upstreamAuth: NEW_SECRET }),
+    })
+
+    const configJson = redis._store.get(`server:${serverId}:config`)!
+    const config = JSON.parse(configJson)
+    expect(config.encryptedAuth).toBeDefined()
+    expect(config.encryptedAuth).not.toBe(NEW_SECRET)
+    expect(JSON.stringify(config)).not.toContain(NEW_SECRET)
+  })
+
+  it('saves updated config with KEEPTTL to preserve original TTL', async () => {
+    const callsBefore = redis.set.mock.calls.length
+
+    await app.request(`/api/v1/servers/${serverId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', 'X-Owner-Key': ownerKey },
+      body: JSON.stringify({ toolPricing: {} }),
+    })
+
+    const patchSetCall = redis.set.mock.calls
+      .slice(callsBefore)
+      .find((c) => c[0] === `server:${serverId}:config`)
+    expect(patchSetCall).toBeDefined()
+    expect(patchSetCall?.[2]).toBe('KEEPTTL')
+  })
+})
+
 // ─── Agent Card: GET /.well-known/agent.json ──────────────────────────────────
 
 describe('GET /.well-known/agent.json', () => {

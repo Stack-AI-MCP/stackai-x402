@@ -40,6 +40,61 @@ const PatchBodySchema = z.object({
 
 export const serversRouter = new Hono<AppEnv>()
 
+// ─── List: GET /api/v1/servers ──────────────────────────────────────────────
+
+serversRouter.get('/', async (c) => {
+  const redis = c.get('redis')
+
+  try {
+    // Scan Redis for all server config keys
+    const keys = await (redis as unknown as { keys(pattern: string): Promise<string[]> }).keys(
+      'server:*:config',
+    )
+
+    if (keys.length === 0) {
+      return c.json({ servers: [] }, 200)
+    }
+
+    // Fetch all configs and their tools in parallel
+    const servers = await Promise.all(
+      keys.map(async (key) => {
+        const serverId = key.split(':')[1]
+        const [configJson, toolsJson] = await Promise.all([
+          redis.get(key),
+          redis.get(`server:${serverId}:tools`),
+        ])
+        if (!configJson) return null
+
+        const config = JSON.parse(configJson) as ServerConfig
+        const tools = toolsJson ? (JSON.parse(toolsJson) as { name: string; price: number }[]) : []
+
+        // Compute price range from tools
+        const prices = tools.map((t) => t.price).filter((p) => p > 0)
+        const priceRange =
+          prices.length > 0
+            ? { min: Math.min(...prices), max: Math.max(...prices) }
+            : { min: 0, max: 0 }
+
+        // Strip sensitive fields
+        const { encryptedAuth: _, ...safeConfig } = config
+
+        return {
+          ...safeConfig,
+          toolCount: tools.length,
+          priceRange,
+        }
+      }),
+    )
+
+    return c.json({ servers: servers.filter(Boolean) }, 200)
+  } catch (err) {
+    console.error('Failed to list servers:', err instanceof Error ? err.message : err)
+    return c.json({ error: 'Failed to list servers', code: 'INTERNAL_ERROR' }, 500)
+  }
+})
+
+// ─── Register: POST /api/v1/servers ─────────────────────────────────────────
+
 serversRouter.post('/', async (c) => {
   let body: unknown
   try {

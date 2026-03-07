@@ -651,6 +651,14 @@ describe('GET /api/v1/servers/introspect', () => {
     expect(body.code).toBe('INVALID_REQUEST')
   })
 
+  it('returns 400 when url uses HTTP instead of HTTPS', async () => {
+    const res = await app.request('/api/v1/servers/introspect?url=http://mcp.example.com')
+    expect(res.status).toBe(400)
+    const body = await res.json() as Record<string, string>
+    expect(body.code).toBe('INVALID_REQUEST')
+    expect(body.error).toContain('HTTPS')
+  })
+
   it('returns discovered tools from MCP server', async () => {
     mockMcpTools([
       { name: 'search', description: 'Search the web' },

@@ -128,19 +128,21 @@ serversRouter.get('/introspect', async (c) => {
     return c.json({ error: 'url query parameter is required', code: 'INVALID_REQUEST' }, 400)
   }
 
+  let parsed: URL
   try {
-    new URL(url)
+    parsed = new URL(url)
   } catch {
     return c.json({ error: 'url must be a valid URL', code: 'INVALID_REQUEST' }, 400)
   }
 
-  try {
-    const tools = await introspectTools(url)
-    return c.json({ tools }, 200)
-  } catch (err) {
-    console.error('Introspection failed:', err instanceof Error ? err.message : err)
-    return c.json({ error: 'Introspection failed', code: 'INTROSPECT_FAILED' }, 500)
+  // SSRF protection: only allow HTTPS to prevent probing internal services
+  if (parsed.protocol !== 'https:') {
+    return c.json({ error: 'Only HTTPS URLs are accepted', code: 'INVALID_REQUEST' }, 400)
   }
+
+  // introspectTools has its own try/catch — always returns [] on failure, never throws
+  const tools = await introspectTools(url)
+  return c.json({ tools }, 200)
 })
 
 // ─── Register: POST /api/v1/servers ─────────────────────────────────────────

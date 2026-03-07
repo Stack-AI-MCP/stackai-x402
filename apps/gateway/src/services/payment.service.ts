@@ -12,6 +12,9 @@ import type { ServerConfig, IntrospectedTool } from './registration.service.js'
 export interface PaymentResult {
   txid: string
   explorerUrl: string
+  tokenType: string
+  amount: string
+  senderAddress: string
 }
 
 export interface ProcessPaymentParams {
@@ -49,7 +52,7 @@ export async function processPayment(params: ProcessPaymentParams): Promise<Paym
   const tokenType = detectPaymentToken(txHex, network)
   const expectedAmount = usdToMicro(tool.price, tokenType, tokenPrices[tokenType])
 
-  const { txid } = await verifyPayment({
+  const { txid, senderAddress } = await verifyPayment({
     header: paymentSignature,
     expectedAmount,
     expectedRecipient: config.recipientAddress,
@@ -63,5 +66,5 @@ export async function processPayment(params: ProcessPaymentParams): Promise<Paym
   const chain = network === 'mainnet' ? 'mainnet' : 'testnet'
   const explorerUrl = `https://explorer.hiro.so/txid/${txid}?chain=${chain}`
 
-  return { txid, explorerUrl }
+  return { txid, explorerUrl, tokenType, amount: expectedAmount.toString(), senderAddress }
 }

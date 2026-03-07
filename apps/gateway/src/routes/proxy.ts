@@ -5,6 +5,7 @@ import { usdToMicro, networkToCAIP2, decrypt, PaymentVerificationError } from 's
 import type { AppEnv } from '../app.js'
 import type { ServerConfig, IntrospectedTool } from '../services/registration.service.js'
 import { processPayment } from '../services/payment.service.js'
+import { enqueuePaymentNotification } from '../services/notification.service.js'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -147,6 +148,9 @@ async function handleProxy(c: Context<AppEnv>, serverId: string): Promise<Respon
     // Verify payment via 6-step engine (AC 1, 2, 3, 4, 5, 6)
     let txid: string
     let explorerUrl: string
+    let paidToken: string
+    let paidAmount: string
+    let senderAddress: string
     try {
       const result = await processPayment({
         paymentSignature: paymentSig,
@@ -160,6 +164,9 @@ async function handleProxy(c: Context<AppEnv>, serverId: string): Promise<Respon
       })
       txid = result.txid
       explorerUrl = result.explorerUrl
+      paidToken = result.tokenType
+      paidAmount = result.amount
+      senderAddress = result.senderAddress
     } catch (err) {
       if (err instanceof PaymentVerificationError) {
         if (err.code === 'RELAY_FAILED') {
@@ -191,13 +198,27 @@ async function handleProxy(c: Context<AppEnv>, serverId: string): Promise<Respon
     // AC 8: success — rebuild response with payment-response header (base64-encoded { txid, explorerUrl })
     // c.header() does not merge into a raw Response; we must include it explicitly.
     const paymentResponse = Buffer.from(JSON.stringify({ txid, explorerUrl })).toString('base64')
-    return new Response(await upstreamRes.text(), {
+    const response = new Response(await upstreamRes.text(), {
       status: upstreamRes.status,
       headers: {
         'Content-Type': upstreamRes.headers.get('content-type') ?? 'application/json',
         'payment-response': paymentResponse,
       },
     })
+
+    // Fire-and-forget notification — NEVER delays the gateway response (NFR3, AC1)
+    setImmediate(() => {
+      enqueuePaymentNotification(redis, {
+        serverId,
+        tool: body.method,
+        amount: paidAmount,
+        token: paidToken,
+        fromAddress: senderAddress,
+        txid,
+      }).catch(() => {})
+    })
+
+    return response
   }
 
   // ── Free tool: forward directly to upstream ────────────────────────────────

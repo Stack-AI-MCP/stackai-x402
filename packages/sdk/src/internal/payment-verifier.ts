@@ -1,6 +1,9 @@
 import {
   deserializeTransaction,
   PayloadType,
+  addressHashModeToVersion,
+  addressFromVersionHash,
+  addressToString,
 } from '@stacks/transactions'
 import type {
   StacksTransactionWire,
@@ -86,6 +89,12 @@ function extractAmount(tx: StacksTransactionWire): bigint {
   throw new Error(`Unsupported payload type: ${tx.payload.payloadType}`)
 }
 
+function extractSender(tx: StacksTransactionWire, network: 'mainnet' | 'testnet'): string {
+  const { hashMode, signer } = tx.auth.spendingCondition
+  const version = addressHashModeToVersion(hashMode, network)
+  return addressToString(addressFromVersionHash(version, signer))
+}
+
 function extractRecipient(tx: StacksTransactionWire): string {
   if (tx.payload.payloadType === PayloadType.TokenTransfer) {
     return (tx.payload as TokenTransferPayloadWire).recipient.value
@@ -133,7 +142,7 @@ function extractRecipient(tx: StacksTransactionWire): string {
  * @throws PaymentVerificationError with a typed error code on payment failures
  * @throws Error (raw) on Redis infrastructure failures
  */
-export async function verifyPayment(params: VerifyPaymentParams): Promise<{ txid: string }> {
+export async function verifyPayment(params: VerifyPaymentParams): Promise<{ txid: string; senderAddress: string }> {
   const { header, expectedAmount, expectedRecipient, expectedNetwork, paymentId, redis, relayUrl } = params
 
   // Step 1: Validate and base64-decode header → hex
@@ -152,6 +161,9 @@ export async function verifyPayment(params: VerifyPaymentParams): Promise<{ txid
   } catch (err) {
     throw new PaymentVerificationError('DESERIALIZE_FAILED', `Failed to deserialize transaction: ${err}`)
   }
+
+  // Extract sender address from the authorization's spending condition
+  const senderAddress = extractSender(tx, expectedNetwork)
 
   // Step 3: Validate amount >= expectedAmount
   let txAmount: bigint
@@ -211,5 +223,5 @@ export async function verifyPayment(params: VerifyPaymentParams): Promise<{ txid
     throw new PaymentVerificationError('RELAY_FAILED', `Relay broadcast failed: ${err}`)
   }
 
-  return { txid }
+  return { txid, senderAddress }
 }

@@ -15,10 +15,15 @@ export interface PaymentNotificationPayload {
 // ─── Queue singleton ─────────────────────────────────────────────────────────
 
 let _queue: Queue | null = null
+let _queueRedis: Redis | null = null
 
 function getQueue(redis: Redis): Queue {
+  if (_queue && _queueRedis !== redis) {
+    throw new Error('Notification queue already initialized with a different Redis connection')
+  }
   if (!_queue) {
     _queue = new Queue('notifications', { connection: redis })
+    _queueRedis = redis
   }
   return _queue
 }
@@ -51,5 +56,6 @@ export async function closeNotificationQueue(): Promise<void> {
   if (_queue) {
     await _queue.close()
     _queue = null
+    _queueRedis = null
   }
 }

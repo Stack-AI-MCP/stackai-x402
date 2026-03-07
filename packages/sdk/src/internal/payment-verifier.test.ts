@@ -7,6 +7,7 @@ import { verifyPayment, PaymentVerificationError } from './payment-verifier.js'
 
 const SENDER_KEY = randomPrivateKey()
 const MAINNET_SENDER = getAddressFromPrivateKey(SENDER_KEY, 'mainnet')
+const TESTNET_SENDER = getAddressFromPrivateKey(SENDER_KEY, 'testnet')
 const MAINNET_RECIPIENT = 'SP3FGQ8Z7JY9BWYZ5WM53E0M9NK7WHJF0691NZ159'
 const TESTNET_RECIPIENT = getAddressFromPrivateKey(SENDER_KEY, 'testnet')
 const PAYMENT_AMOUNT = 1_000_000n
@@ -113,6 +114,19 @@ describe('verifyPayment — success path', () => {
     await expect(
       verifyPayment(baseParams({ header: sbtcHeader, paymentId: PAYMENT_ID + '-sbtc', redis: makeRedis('OK') })),
     ).resolves.toMatchObject({ txid: 'mock-txid-abc123', senderAddress: MAINNET_SENDER })
+  })
+
+  it('returns testnet sender address (ST prefix) for testnet transactions', async () => {
+    await expect(
+      verifyPayment(baseParams({
+        header: testnetStxHeader,
+        expectedRecipient: TESTNET_RECIPIENT,
+        expectedNetwork: 'testnet',
+        paymentId: PAYMENT_ID + '-testnet',
+        redis: makeRedis('OK'),
+      })),
+    ).resolves.toMatchObject({ txid: 'mock-txid-abc123', senderAddress: TESTNET_SENDER })
+    expect(TESTNET_SENDER).toMatch(/^ST/)
   })
 })
 

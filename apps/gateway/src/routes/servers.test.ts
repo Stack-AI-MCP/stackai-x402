@@ -17,6 +17,14 @@ function makeRedis() {
       store.delete(key)
       return 1
     }),
+    // SCAN: returns cursor '0' (complete) with all matching keys in one batch
+    scan: vi.fn(async (_cursor: string, _matchArg: string, pattern: string) => {
+      const regex = new RegExp('^' + pattern.replace(/\*/g, '.*') + '$')
+      const matching = Array.from(store.keys()).filter((k) => regex.test(k))
+      return ['0', matching] as [string, string[]]
+    }),
+    // MGET: fetch multiple keys in one call
+    mget: vi.fn(async (...keys: string[]) => keys.map((k) => store.get(k) ?? null)),
     _store: store,
   }
 }
@@ -462,5 +470,154 @@ describe('GET /.well-known/agent.json', () => {
   it('returns 400 when server param is missing', async () => {
     const res = await app.request('/.well-known/agent.json')
     expect(res.status).toBe(400)
+  })
+})
+
+// ─── List: GET /api/v1/servers ────────────────────────────────────────────────
+
+describe('GET /api/v1/servers', () => {
+  let redis: ReturnType<typeof makeRedis>
+  let app: ReturnType<typeof createApp>
+
+  beforeEach(() => {
+    redis = makeRedis()
+    app = createApp({
+      redis,
+      encryptionKey: ENCRYPTION_KEY,
+      network: 'mainnet',
+      tokenPrices: { STX: 3.0, sBTC: 100_000.0, USDCx: 1.0 },
+    })
+    vi.unstubAllGlobals()
+  })
+
+  it('returns empty array when no servers are registered', async () => {
+    const res = await app.request('/api/v1/servers')
+    expect(res.status).toBe(200)
+    const body = await res.json() as { servers: unknown[] }
+    expect(body.servers).toEqual([])
+  })
+
+  it('returns servers with correct toolCount and priceRange', async () => {
+    const config = {
+      serverId: 'test-id-1',
+      name: 'My Server',
+      description: 'A test',
+      url: 'https://example.com',
+      recipientAddress: 'SP3FGQ8Z7JY9BWYZ5WM53E0M9NK7WHJF0691NZ159',
+      acceptedTokens: ['STX', 'sBTC'],
+      toolPricing: {},
+      createdAt: new Date().toISOString(),
+    }
+    const tools = [
+      { name: 'cheap-tool', price: 100, acceptedTokens: ['STX'] },
+      { name: 'expensive-tool', price: 500, acceptedTokens: ['STX'] },
+      { name: 'free-tool', price: 0, acceptedTokens: ['sBTC'] },
+    ]
+
+    redis._store.set('server:test-id-1:config', JSON.stringify(config))
+    redis._store.set('server:test-id-1:tools', JSON.stringify(tools))
+
+    const res = await app.request('/api/v1/servers')
+    expect(res.status).toBe(200)
+    const body = await res.json() as { servers: Record<string, unknown>[] }
+    expect(body.servers).toHaveLength(1)
+
+    const server = body.servers[0]
+    expect(server.serverId).toBe('test-id-1')
+    expect(server.name).toBe('My Server')
+    expect(server.toolCount).toBe(3)
+    expect(server.priceRange).toEqual({ min: 100, max: 500 })
+    expect(server.acceptedTokens).toEqual(['STX', 'sBTC'])
+  })
+
+  it('does not expose encryptedAuth in response', async () => {
+    const config = {
+      serverId: 'secure-id',
+      name: 'Secure Server',
+      description: '',
+      url: 'https://secure.example.com',
+      recipientAddress: 'SP3FGQ8Z7JY9BWYZ5WM53E0M9NK7WHJF0691NZ159',
+      acceptedTokens: ['STX'],
+      toolPricing: {},
+      encryptedAuth: 'super-secret-encrypted-value',
+      createdAt: new Date().toISOString(),
+    }
+
+    redis._store.set('server:secure-id:config', JSON.stringify(config))
+
+    const res = await app.request('/api/v1/servers')
+    expect(res.status).toBe(200)
+    const body = await res.json() as { servers: Record<string, unknown>[] }
+    const server = body.servers[0]
+    expect(server.encryptedAuth).toBeUndefined()
+  })
+
+  it('skips entries with null configJson (filter(Boolean) path)', async () => {
+    // Put a tools key with no matching config — simulates orphaned key
+    redis._store.set('server:orphan-id:tools', JSON.stringify([]))
+    // Also add a valid server
+    const config = {
+      serverId: 'valid-id',
+      name: 'Valid Server',
+      description: '',
+      url: 'https://valid.example.com',
+      recipientAddress: 'SP3FGQ8Z7JY9BWYZ5WM53E0M9NK7WHJF0691NZ159',
+      acceptedTokens: ['USDCx'],
+      toolPricing: {},
+      createdAt: new Date().toISOString(),
+    }
+    redis._store.set('server:valid-id:config', JSON.stringify(config))
+
+    const res = await app.request('/api/v1/servers')
+    expect(res.status).toBe(200)
+    const body = await res.json() as { servers: Record<string, unknown>[] }
+    // Only valid-id (which has a config) shows up
+    expect(body.servers.every((s) => s.serverId !== 'orphan-id')).toBe(true)
+  })
+
+  it('returns priceRange {0,0} when all tools are free', async () => {
+    const config = {
+      serverId: 'free-id',
+      name: 'Free Server',
+      description: '',
+      url: 'https://free.example.com',
+      recipientAddress: 'SP3FGQ8Z7JY9BWYZ5WM53E0M9NK7WHJF0691NZ159',
+      acceptedTokens: ['STX'],
+      toolPricing: {},
+      createdAt: new Date().toISOString(),
+    }
+    const tools = [{ name: 'free-tool', price: 0, acceptedTokens: ['STX'] }]
+
+    redis._store.set('server:free-id:config', JSON.stringify(config))
+    redis._store.set('server:free-id:tools', JSON.stringify(tools))
+
+    const res = await app.request('/api/v1/servers')
+    expect(res.status).toBe(200)
+    const body = await res.json() as { servers: Record<string, unknown>[] }
+    expect(body.servers[0].priceRange).toEqual({ min: 0, max: 0 })
+  })
+
+  it('skips corrupt config entry and returns remaining valid servers', async () => {
+    // Corrupt config
+    redis._store.set('server:corrupt-id:config', 'not-valid-json{{{')
+    // Valid server
+    const config = {
+      serverId: 'ok-id',
+      name: 'OK Server',
+      description: '',
+      url: 'https://ok.example.com',
+      recipientAddress: 'SP3FGQ8Z7JY9BWYZ5WM53E0M9NK7WHJF0691NZ159',
+      acceptedTokens: ['STX'],
+      toolPricing: {},
+      createdAt: new Date().toISOString(),
+    }
+    redis._store.set('server:ok-id:config', JSON.stringify(config))
+
+    const res = await app.request('/api/v1/servers')
+    expect(res.status).toBe(200)
+    const body = await res.json() as { servers: Record<string, unknown>[] }
+    // Corrupt entry is skipped, valid one still returned
+    expect(body.servers).toHaveLength(1)
+    expect(body.servers[0].serverId).toBe('ok-id')
   })
 })

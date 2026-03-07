@@ -2,7 +2,7 @@ import { timingSafeEqual } from 'node:crypto'
 import { Hono } from 'hono'
 import { z } from 'zod'
 import { registerServer } from '../services/registration.service.js'
-import type { ServerConfig } from '../services/registration.service.js'
+import type { ServerConfig, RedisLike } from '../services/registration.service.js'
 import type { AppEnv } from '../app.js'
 import { encrypt } from 'stackai-x402/internal'
 
@@ -42,49 +42,75 @@ export const serversRouter = new Hono<AppEnv>()
 
 // ─── List: GET /api/v1/servers ──────────────────────────────────────────────
 
+/** Cursor-based SCAN — safe for production unlike KEYS which blocks Redis. */
+async function scanAllKeys(redis: RedisLike, pattern: string): Promise<string[]> {
+  const keys: string[] = []
+  let cursor = '0'
+  do {
+    const [nextCursor, batch] = await redis.scan(cursor, 'MATCH', pattern, 'COUNT', '100')
+    cursor = nextCursor
+    keys.push(...batch)
+  } while (cursor !== '0')
+  return keys
+}
+
 serversRouter.get('/', async (c) => {
   const redis = c.get('redis')
 
   try {
-    // Scan Redis for all server config keys
-    const keys = await (redis as unknown as { keys(pattern: string): Promise<string[]> }).keys(
-      'server:*:config',
-    )
+    const configKeys = await scanAllKeys(redis as never, 'server:*:config')
 
-    if (keys.length === 0) {
+    if (configKeys.length === 0) {
       return c.json({ servers: [] }, 200)
     }
 
-    // Fetch all configs and their tools in parallel
-    const servers = await Promise.all(
-      keys.map(async (key) => {
-        const serverId = key.split(':')[1]
-        const [configJson, toolsJson] = await Promise.all([
-          redis.get(key),
-          redis.get(`server:${serverId}:tools`),
-        ])
-        if (!configJson) return null
+    // Extract server IDs and build tool keys list
+    const serverIds = configKeys.map((key) => key.split(':')[1])
+    const toolKeys = serverIds.map((id) => `server:${id}:tools`)
 
-        const config = JSON.parse(configJson) as ServerConfig
-        const tools = toolsJson ? (JSON.parse(toolsJson) as { name: string; price: number }[]) : []
+    // Fetch all configs and tools in 2 MGET round-trips instead of 2N individual GETs
+    const [configValues, toolValues] = await Promise.all([
+      redis.mget(...configKeys),
+      redis.mget(...toolKeys),
+    ])
 
-        // Compute price range from tools
-        const prices = tools.map((t) => t.price).filter((p) => p > 0)
-        const priceRange =
-          prices.length > 0
-            ? { min: Math.min(...prices), max: Math.max(...prices) }
-            : { min: 0, max: 0 }
+    const servers = configValues.map((configJson, i) => {
+      if (!configJson) return null
 
-        // Strip sensitive fields
-        const { encryptedAuth: _, ...safeConfig } = config
+      let config: ServerConfig
+      let tools: { name: string; price: number }[] = []
 
-        return {
-          ...safeConfig,
-          toolCount: tools.length,
-          priceRange,
-        }
-      }),
-    )
+      try {
+        config = JSON.parse(configJson) as ServerConfig
+      } catch {
+        console.error(`Skipping corrupt config for key ${configKeys[i]}`)
+        return null
+      }
+
+      try {
+        tools = toolValues[i] ? (JSON.parse(toolValues[i]!) as { name: string; price: number }[]) : []
+      } catch {
+        console.error(`Skipping corrupt tools for server ${serverIds[i]}`)
+        tools = []
+      }
+
+      // Compute price range from tools (only count paid tools)
+      const prices = tools.map((t) => t.price).filter((p) => p > 0)
+      const priceRange =
+        prices.length > 0
+          ? { min: Math.min(...prices), max: Math.max(...prices) }
+          : { min: 0, max: 0 }
+
+      // Strip sensitive fields before responding
+      const { encryptedAuth: _, ...safeConfig } = config
+
+      return {
+        ...safeConfig,
+        acceptedTokens: safeConfig.acceptedTokens ?? [],
+        toolCount: tools.length,
+        priceRange,
+      }
+    })
 
     return c.json({ servers: servers.filter(Boolean) }, 200)
   } catch (err) {

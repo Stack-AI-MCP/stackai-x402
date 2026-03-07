@@ -43,6 +43,10 @@ export interface RedisLike {
   set(key: string, value: string, ...args: any[]): Promise<string | null>
   get(key: string): Promise<string | null>
   del(key: string): Promise<number>
+  /** Cursor-based key iteration — safe for production (non-blocking). */
+  scan(cursor: string, ...args: string[]): Promise<[string, string[]]>
+  /** Fetch multiple keys in one round-trip. */
+  mget(...keys: string[]): Promise<(string | null)[]>
 }
 
 // ─── Parameters ───────────────────────────────────────────────────────────────

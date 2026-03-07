@@ -1,7 +1,7 @@
 import { timingSafeEqual } from 'node:crypto'
 import { Hono } from 'hono'
 import { z } from 'zod'
-import { registerServer } from '../services/registration.service.js'
+import { registerServer, introspectTools } from '../services/registration.service.js'
 import type { ServerConfig, RedisLike } from '../services/registration.service.js'
 import type { AppEnv } from '../app.js'
 import { encrypt } from 'stackai-x402/internal'
@@ -116,6 +116,30 @@ serversRouter.get('/', async (c) => {
   } catch (err) {
     console.error('Failed to list servers:', err instanceof Error ? err.message : err)
     return c.json({ error: 'Failed to list servers', code: 'INTERNAL_ERROR' }, 500)
+  }
+})
+
+// ─── Introspect: GET /api/v1/servers/introspect ─────────────────────────────
+
+serversRouter.get('/introspect', async (c) => {
+  const url = c.req.query('url')
+
+  if (!url) {
+    return c.json({ error: 'url query parameter is required', code: 'INVALID_REQUEST' }, 400)
+  }
+
+  try {
+    new URL(url)
+  } catch {
+    return c.json({ error: 'url must be a valid URL', code: 'INVALID_REQUEST' }, 400)
+  }
+
+  try {
+    const tools = await introspectTools(url)
+    return c.json({ tools }, 200)
+  } catch (err) {
+    console.error('Introspection failed:', err instanceof Error ? err.message : err)
+    return c.json({ error: 'Introspection failed', code: 'INTROSPECT_FAILED' }, 500)
   }
 })
 

@@ -66,7 +66,7 @@ interface MCPTool {
  * Returns an empty array if the server is unreachable, times out (5 s),
  * or returns a non-JSON response (e.g. SSE). Registration is never blocked.
  */
-async function introspectTools(serverUrl: string): Promise<MCPTool[]> {
+export async function introspectTools(serverUrl: string): Promise<MCPTool[]> {
   try {
     const res = await fetch(serverUrl, {
       method: 'POST',

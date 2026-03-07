@@ -621,3 +621,60 @@ describe('GET /api/v1/servers', () => {
     expect(body.servers[0].serverId).toBe('ok-id')
   })
 })
+
+// ─── Introspect: GET /api/v1/servers/introspect ──────────────────────────────
+
+describe('GET /api/v1/servers/introspect', () => {
+  let app: ReturnType<typeof createApp>
+
+  beforeEach(() => {
+    app = createApp({
+      redis: makeRedis(),
+      encryptionKey: ENCRYPTION_KEY,
+      network: 'mainnet',
+      tokenPrices: { STX: 3.0, sBTC: 100_000.0, USDCx: 1.0 },
+    })
+    vi.unstubAllGlobals()
+  })
+
+  it('returns 400 when url query parameter is missing', async () => {
+    const res = await app.request('/api/v1/servers/introspect')
+    expect(res.status).toBe(400)
+    const body = await res.json() as Record<string, string>
+    expect(body.code).toBe('INVALID_REQUEST')
+  })
+
+  it('returns 400 when url is not a valid URL', async () => {
+    const res = await app.request('/api/v1/servers/introspect?url=not-a-url')
+    expect(res.status).toBe(400)
+    const body = await res.json() as Record<string, string>
+    expect(body.code).toBe('INVALID_REQUEST')
+  })
+
+  it('returns discovered tools from MCP server', async () => {
+    mockMcpTools([
+      { name: 'search', description: 'Search the web' },
+      { name: 'summarize', description: 'Summarize text' },
+    ])
+
+    const res = await app.request(
+      '/api/v1/servers/introspect?url=https://mcp.example.com',
+    )
+    expect(res.status).toBe(200)
+    const body = await res.json() as { tools: Array<{ name: string; description?: string }> }
+    expect(body.tools).toHaveLength(2)
+    expect(body.tools[0].name).toBe('search')
+    expect(body.tools[1].name).toBe('summarize')
+  })
+
+  it('returns empty tools array when MCP server is unreachable', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('ECONNREFUSED')))
+
+    const res = await app.request(
+      '/api/v1/servers/introspect?url=https://unreachable.example.com',
+    )
+    expect(res.status).toBe(200)
+    const body = await res.json() as { tools: unknown[] }
+    expect(body.tools).toEqual([])
+  })
+})

@@ -27,6 +27,7 @@ export interface IntrospectedTool {
   description: string
   price: number
   acceptedTokens: TokenType[]
+  inputSchema?: Record<string, unknown>
 }
 
 export interface ServerConfig {
@@ -59,6 +60,7 @@ export type { RedisLike }
 interface MCPTool {
   name: string
   description?: string
+  inputSchema?: Record<string, unknown>
 }
 
 /**
@@ -139,6 +141,7 @@ export async function registerServer(
     description: tool.description ?? '',
     price: toolPricing[tool.name]?.price ?? 0,
     acceptedTokens,
+    ...(tool.inputSchema && { inputSchema: tool.inputSchema }),
   }))
 
   const TTL = ['EX', 2_592_000] as const

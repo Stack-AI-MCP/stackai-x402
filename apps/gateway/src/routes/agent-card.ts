@@ -38,6 +38,7 @@ agentCardRouter.get('/', async (c) => {
       description: t.description,
       price: t.price,
       acceptedTokens: t.acceptedTokens,
+      ...(t.inputSchema && { inputSchema: t.inputSchema }),
     })),
     gatewayUrl: `/api/v1/proxy/${serverId}`,
     version: '1.0',

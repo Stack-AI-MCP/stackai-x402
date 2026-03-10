@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { enqueuePaymentNotification, closeNotificationQueue } from './notification.service.js'
+import { enqueuePaymentNotification, enqueueErrorRateAlert, closeNotificationQueue } from './notification.service.js'
 import type { PaymentNotificationPayload } from './notification.service.js'
+import type { ErrorRateAlertPayload } from 'stackai-x402/hooks'
 
 // ─── Mock BullMQ ─────────────────────────────────────────────────────────────
 
@@ -77,5 +78,24 @@ describe('notification.service', () => {
     await closeNotificationQueue()
 
     expect(mockClose).toHaveBeenCalledTimes(1)
+  })
+
+  it('enqueues a notify:error-rate-alert job with correct payload and retry config', async () => {
+    const alertPayload: ErrorRateAlertPayload = {
+      serverId: 'server-xyz',
+      errorRate: 0.15,
+    }
+
+    await enqueueErrorRateAlert(fakeRedis, alertPayload)
+
+    expect(mockAdd).toHaveBeenCalledTimes(1)
+    expect(mockAdd).toHaveBeenCalledWith(
+      'notify:error-rate-alert',
+      alertPayload,
+      {
+        attempts: 3,
+        backoff: { type: 'exponential', delay: 2000 },
+      },
+    )
   })
 })

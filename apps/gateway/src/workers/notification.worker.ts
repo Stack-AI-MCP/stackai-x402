@@ -1,7 +1,10 @@
 import { Worker } from 'bullmq'
 import { Api } from 'grammy'
 import type { Redis } from 'ioredis'
-import type { PaymentNotificationPayload } from '../services/notification.service.js'
+import type {
+  PaymentNotificationPayload,
+  ErrorRateAlertPayload,
+} from '../services/notification.service.js'
 
 // ─── Message formatting ──────────────────────────────────────────────────────
 
@@ -12,6 +15,16 @@ function formatTelegramMessage(data: PaymentNotificationPayload): string {
     `Amount: ${data.amount} ${data.token}`,
     `From: ${data.fromAddress}`,
     `Tx: ${data.txid}`,
+  ].join('\n')
+}
+
+function formatErrorRateAlert(data: ErrorRateAlertPayload): string {
+  const pct = (data.errorRate * 100).toFixed(1)
+  return [
+    `\u{26A0}\u{FE0F} High error rate alert`,
+    `Server: ${data.serverId}`,
+    `Error rate: ${pct}% (1-hour rolling window)`,
+    `Action: Check upstream server health`,
   ].join('\n')
 }
 
@@ -27,6 +40,72 @@ export interface NotificationWorkerDeps {
   pubRedis: Redis
   /** Telegram bot token — if falsy, Telegram delivery is globally disabled */
   telegramBotToken?: string
+}
+
+/**
+ * Handles error-rate alert jobs (Story 3-4, AC2, AC4, AC6).
+ *
+ * Delivery channels:
+ * 1. Moltbook comment on agent post (if agentId configured — Story 4.2)
+ * 2. Telegram message (if telegramChatId configured)
+ * 3. Redis pub/sub for SSE
+ *
+ * If Moltbook is unavailable, BullMQ retries up to 3 times then discards (NFR14).
+ */
+async function handleErrorRateAlert(
+  redis: Redis,
+  pubRedis: Redis,
+  telegramApi: Api | null,
+  data: ErrorRateAlertPayload,
+): Promise<void> {
+  const configJson = await redis.get(`server:${data.serverId}:config`)
+  if (!configJson) return
+
+  const config = JSON.parse(configJson) as {
+    telegramChatId?: string
+    moltbookAgentId?: string
+    moltbookApiKey?: string
+  }
+
+  // ── Moltbook comment (AC2 — post alert on agent's feed) ──────────
+  if (config.moltbookAgentId && config.moltbookApiKey) {
+    const pct = (data.errorRate * 100).toFixed(1)
+    const res = await fetch(
+      `https://api.moltbook.com/agents/${config.moltbookAgentId}/comments`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${config.moltbookApiKey}`,
+        },
+        body: JSON.stringify({
+          text: `Error rate alert: ${pct}% errors in the last hour. Please investigate.`,
+        }),
+        signal: AbortSignal.timeout(10_000),
+      },
+    )
+    if (!res.ok) {
+      throw new Error(`Moltbook returned ${res.status}`)
+    }
+  }
+
+  // ── Telegram alert ────────────────────────────────────────────────
+  if (telegramApi && config.telegramChatId) {
+    await telegramApi.sendMessage(
+      config.telegramChatId,
+      formatErrorRateAlert(data),
+    )
+  }
+
+  // ── Redis pub/sub for SSE ─────────────────────────────────────────
+  await pubRedis.publish(
+    `notifications:${data.serverId}`,
+    JSON.stringify({
+      type: 'error-rate-alert',
+      ...data,
+      timestamp: Date.now(),
+    }),
+  )
 }
 
 /**
@@ -46,10 +125,18 @@ export function createNotificationWorker(deps: NotificationWorkerDeps): Worker {
 
   const telegramApi = telegramBotToken ? new Api(telegramBotToken) : null
 
-  const worker = new Worker<PaymentNotificationPayload>(
+  const worker = new Worker(
     'notifications',
     async (job) => {
-      const data = job.data
+      // ── Error-rate alert (Story 3-4, AC2) ─────────────────────────
+      if (job.name === 'notify:error-rate-alert') {
+        const alertData = job.data as ErrorRateAlertPayload
+        await handleErrorRateAlert(redis, pubRedis, telegramApi, alertData)
+        return
+      }
+
+      // ── Payment notification (Story 1-10) ─────────────────────────
+      const data = job.data as PaymentNotificationPayload
 
       // Load server config to get delivery targets
       const configJson = await redis.get(`server:${data.serverId}:config`)
@@ -94,7 +181,9 @@ export function createNotificationWorker(deps: NotificationWorkerDeps): Worker {
         }),
       )
     },
-    { connection: redis },
+    // BullMQ pins ioredis@5.9.3 internally while gateway uses ^5.10.0.
+    // Runtime-compatible — cast at the BullMQ boundary.
+    { connection: redis as any }, // eslint-disable-line @typescript-eslint/no-explicit-any
   )
 
   return worker

@@ -2,8 +2,11 @@ import { Hono } from 'hono'
 import { serversRouter } from './routes/servers.js'
 import { agentCardRouter } from './routes/agent-card.js'
 import { proxyRouter } from './routes/proxy.js'
+import { analyticsRouter } from './routes/analytics.js'
+import { adminRouter } from './routes/admin.js'
 import type { RedisLike } from './services/registration.service.js'
 import type { TokenType } from 'stackai-x402/internal'
+import type { Hook } from 'stackai-x402/hooks'
 
 // ─── Hono typed context variables ────────────────────────────────────────────
 
@@ -14,6 +17,8 @@ export type AppEnv = {
     network: 'mainnet' | 'testnet'
     tokenPrices: Record<TokenType, number>
     relayUrl: string
+    hooks: Hook[]
+    operatorKey: string | undefined
   }
 }
 
@@ -23,6 +28,8 @@ export interface AppDeps {
   network: 'mainnet' | 'testnet'
   tokenPrices: Record<TokenType, number>
   relayUrl: string
+  hooks?: Hook[]
+  operatorKey?: string
 }
 
 // ─── App factory ──────────────────────────────────────────────────────────────
@@ -42,12 +49,16 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     c.set('network', deps.network)
     c.set('tokenPrices', deps.tokenPrices)
     c.set('relayUrl', deps.relayUrl)
+    c.set('hooks', deps.hooks ?? [])
+    c.set('operatorKey', deps.operatorKey)
     await next()
   })
 
   // ─── Routes ────────────────────────────────────────────────────────────────
   app.get('/health', (c) => c.json({ status: 'ok' }))
   app.route('/api/v1/servers', serversRouter)
+  app.route('/api/v1/servers', analyticsRouter)
+  app.route('/api/v1/admin', adminRouter)
   app.route('/api/v1/proxy', proxyRouter)
   app.route('/.well-known/agent.json', agentCardRouter)
 

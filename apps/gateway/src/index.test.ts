@@ -3,7 +3,17 @@ import { createApp } from './app.js'
 
 // Minimal deps for the health endpoint — no Redis or encryption needed
 const app = createApp({
-  redis: { set: async () => 'OK', get: async () => null, del: async () => 1 },
+  redis: {
+    set: async () => 'OK',
+    get: async () => null,
+    del: async () => 1,
+    scan: async () => ['0', []] as [string, string[]],
+    mget: async () => [],
+    incr: async () => 1,
+    incrby: async () => 1,
+    pfadd: async () => 1,
+    pfcount: async () => 0,
+  },
   encryptionKey: 'a'.repeat(64),
   network: 'mainnet',
   tokenPrices: { STX: 3.0, sBTC: 100_000.0, USDCx: 1.0 },

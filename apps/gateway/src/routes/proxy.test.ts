@@ -1,4 +1,5 @@
-import { describe, it, expect, vi, beforeEach, beforeAll } from 'vitest'
+import { describe, it, expect, vi, beforeEach, beforeAll, afterEach } from 'vitest'
+import type { RequestContext } from 'stackai-x402/hooks'
 import { createApp } from '../app.js'
 import type { ServerConfig, IntrospectedTool } from '../services/registration.service.js'
 import { buildPaymentTransaction, encrypt } from 'stackai-x402/internal'
@@ -28,6 +29,12 @@ function makeRedis(initial: Record<string, string> = {}) {
       store.delete(key)
       return 1
     }),
+    scan: vi.fn(async () => ['0', []] as [string, string[]]),
+    mget: vi.fn(async () => [] as (string | null)[]),
+    incr: vi.fn(async () => 1),
+    incrby: vi.fn(async () => 1),
+    pfadd: vi.fn(async () => 1),
+    pfcount: vi.fn(async () => 0),
     _store: store,
   }
 }
@@ -516,5 +523,129 @@ describe('POST /api/v1/proxy/:serverId — upstream auth (AC4)', () => {
     expect(res.status).toBe(500)
     const body = await res.json() as Record<string, string>
     expect(body.code).toBe('INTERNAL_ERROR')
+  })
+})
+
+// ─── Hook integration: fireHooks wiring ──────────────────────────────────────
+
+/** Drain setImmediate callbacks and their promise chains. */
+function flushImmediate(): Promise<void> {
+  return new Promise((resolve) => setImmediate(() => setTimeout(resolve, 10)))
+}
+
+describe('POST /api/v1/proxy/:serverId — hook integration (Story 3-1)', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('fires hooks with success:true after a free tool call', async () => {
+    const captured: RequestContext[] = []
+    const hook = { onRequest: vi.fn(async (ctx: RequestContext) => { captured.push(ctx) }) }
+
+    const config = makeConfig()
+    const tools = makeTools([{ name: 'free-tool', price: 0 }])
+    const redis = makeRedis({
+      [`server:${SERVER_ID}:config`]: JSON.stringify(config),
+      [`server:${SERVER_ID}:tools`]: JSON.stringify(tools),
+    })
+
+    const app = createApp({
+      redis,
+      encryptionKey: ENCRYPTION_KEY,
+      network: 'mainnet',
+      relayUrl: RELAY_URL,
+      tokenPrices: { STX: 3.0, sBTC: 100_000.0, USDCx: 1.0 },
+      hooks: [hook],
+    })
+
+    mockUpstream({ jsonrpc: '2.0', id: 1, result: {} })
+
+    const res = await app.request(`/api/v1/proxy/${SERVER_ID}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'free-tool' }),
+    })
+    await flushImmediate()
+
+    expect(res.status).toBe(200)
+    expect(hook.onRequest).toHaveBeenCalledOnce()
+    expect(captured[0]).toMatchObject({
+      serverId: SERVER_ID,
+      toolName: 'free-tool',
+      success: true,
+    })
+    expect(captured[0].durationMs).toBeGreaterThanOrEqual(0)
+  })
+
+  it('fires hooks with success:false when free tool upstream fails', async () => {
+    const captured: RequestContext[] = []
+    const hook = { onRequest: vi.fn(async (ctx: RequestContext) => { captured.push(ctx) }) }
+
+    const config = makeConfig()
+    const tools = makeTools([{ name: 'free-tool', price: 0 }])
+    const redis = makeRedis({
+      [`server:${SERVER_ID}:config`]: JSON.stringify(config),
+      [`server:${SERVER_ID}:tools`]: JSON.stringify(tools),
+    })
+
+    const app = createApp({
+      redis,
+      encryptionKey: ENCRYPTION_KEY,
+      network: 'mainnet',
+      relayUrl: RELAY_URL,
+      tokenPrices: { STX: 3.0, sBTC: 100_000.0, USDCx: 1.0 },
+      hooks: [hook],
+    })
+
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('ECONNREFUSED')))
+
+    const res = await app.request(`/api/v1/proxy/${SERVER_ID}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'free-tool' }),
+    })
+    await flushImmediate()
+
+    expect(res.status).toBe(502)
+    expect(hook.onRequest).toHaveBeenCalledOnce()
+    expect(captured[0]).toMatchObject({
+      serverId: SERVER_ID,
+      toolName: 'free-tool',
+      success: false,
+    })
+  })
+
+  it('hook errors do not affect the gateway response', async () => {
+    const hook = {
+      onRequest: vi.fn(async () => { throw new Error('hook exploded') }),
+    }
+
+    const config = makeConfig()
+    const tools = makeTools([{ name: 'free-tool', price: 0 }])
+    const redis = makeRedis({
+      [`server:${SERVER_ID}:config`]: JSON.stringify(config),
+      [`server:${SERVER_ID}:tools`]: JSON.stringify(tools),
+    })
+
+    const app = createApp({
+      redis,
+      encryptionKey: ENCRYPTION_KEY,
+      network: 'mainnet',
+      relayUrl: RELAY_URL,
+      tokenPrices: { STX: 3.0, sBTC: 100_000.0, USDCx: 1.0 },
+      hooks: [hook],
+    })
+
+    mockUpstream({ jsonrpc: '2.0', id: 1, result: {} })
+
+    const res = await app.request(`/api/v1/proxy/${SERVER_ID}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'free-tool' }),
+    })
+    await flushImmediate()
+
+    // Hook threw, but response must still be 200
+    expect(res.status).toBe(200)
   })
 })

@@ -25,6 +25,10 @@ function makeRedis() {
     }),
     // MGET: fetch multiple keys in one call
     mget: vi.fn(async (...keys: string[]) => keys.map((k) => store.get(k) ?? null)),
+    incr: vi.fn(async () => 1),
+    incrby: vi.fn(async () => 1),
+    pfadd: vi.fn(async () => 1),
+    pfcount: vi.fn(async () => 0),
     _store: store,
   }
 }
@@ -209,6 +213,12 @@ describe('POST /api/v1/servers', () => {
       set: vi.fn().mockRejectedValue(new Error('connect ECONNREFUSED 127.0.0.1:6379')),
       get: vi.fn().mockResolvedValue(null),
       del: vi.fn().mockResolvedValue(1),
+      scan: vi.fn().mockResolvedValue(['0', []]),
+      mget: vi.fn().mockResolvedValue([]),
+      incr: vi.fn().mockResolvedValue(1),
+      incrby: vi.fn().mockResolvedValue(1),
+      pfadd: vi.fn().mockResolvedValue(1),
+      pfcount: vi.fn().mockResolvedValue(0),
     }
     const failApp = createApp({
       redis: brokenRedis,
@@ -230,6 +240,231 @@ describe('POST /api/v1/servers', () => {
     // Internal error details must NOT be surfaced to the client
     expect(body.error).not.toContain('ECONNREFUSED')
     expect(body.error).not.toContain('127.0.0.1')
+  })
+})
+
+// ─── Registration: SSRF + negative price validation ──────────────────────────
+
+describe('POST /api/v1/servers — SSRF and price validation', () => {
+  let redis: ReturnType<typeof makeRedis>
+  let app: ReturnType<typeof createApp>
+
+  beforeEach(() => {
+    redis = makeRedis()
+    app = createApp({
+      redis,
+      encryptionKey: ENCRYPTION_KEY,
+      network: 'mainnet',
+      tokenPrices: { STX: 3.0, sBTC: 100_000.0, USDCx: 1.0 },
+    })
+    vi.unstubAllGlobals()
+  })
+
+  it('returns 500 when url targets localhost (SSRF guard)', async () => {
+    const res = await app.request('/api/v1/servers', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...VALID_BODY, url: 'https://localhost:3000' }),
+    })
+    expect(res.status).toBe(500)
+    const body = await res.json() as Record<string, string>
+    expect(body.code).toBe('REGISTRATION_FAILED')
+  })
+
+  it('returns 500 when url targets 127.0.0.1 (SSRF guard)', async () => {
+    const res = await app.request('/api/v1/servers', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...VALID_BODY, url: 'https://127.0.0.1/api' }),
+    })
+    expect(res.status).toBe(500)
+    const body = await res.json() as Record<string, string>
+    expect(body.code).toBe('REGISTRATION_FAILED')
+  })
+
+  it('returns 400 when toolPricing contains a negative price', async () => {
+    const res = await app.request('/api/v1/servers', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ...VALID_BODY,
+        toolPricing: { 'search': { price: -5 } },
+      }),
+    })
+    expect(res.status).toBe(400)
+    const body = await res.json() as Record<string, string>
+    expect(body.code).toBe('INVALID_REQUEST')
+    expect(body.field).toBe('toolPricing.search.price')
+  })
+})
+
+it('returns 400 when introspect url targets private range (SSRF guard)', async () => {
+  const app = createApp({
+    redis: makeRedis(),
+    encryptionKey: ENCRYPTION_KEY,
+    network: 'mainnet',
+    tokenPrices: { STX: 3.0, sBTC: 100_000.0, USDCx: 1.0 },
+  })
+
+  for (const privateUrl of [
+    'https://10.0.0.1/mcp',
+    'https://192.168.1.1/mcp',
+    'https://172.16.0.1/mcp',
+  ]) {
+    const res = await app.request(
+      `/api/v1/servers/introspect?url=${encodeURIComponent(privateUrl)}`,
+    )
+    expect(res.status).toBe(400)
+    const body = await res.json() as Record<string, string>
+    expect(body.code).toBe('INVALID_REQUEST')
+  }
+})
+
+// ─── Moltbook integration (AC: 1, 3, 4, 5, 6) ───────────────────────────────
+
+describe('POST /api/v1/servers — Moltbook integration', () => {
+  let redis: ReturnType<typeof makeRedis>
+  let app: ReturnType<typeof createApp>
+
+  beforeEach(() => {
+    redis = makeRedis()
+    app = createApp({
+      redis,
+      encryptionKey: ENCRYPTION_KEY,
+      network: 'mainnet',
+      tokenPrices: { STX: 3.0, sBTC: 100_000.0, USDCx: 1.0 },
+    })
+    vi.unstubAllGlobals()
+  })
+
+  function mockMcpAndMoltbook(moltbookStatus: number, moltbookBody?: object) {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation((url: string) => {
+        const u = new URL(url)
+        if (u.hostname === 'api.moltbook.com') {
+          if (moltbookStatus >= 200 && moltbookStatus < 300) {
+            return Promise.resolve(
+              new Response(JSON.stringify(moltbookBody ?? {}), {
+                status: moltbookStatus,
+                headers: { 'Content-Type': 'application/json' },
+              }),
+            )
+          }
+          return Promise.resolve(new Response('service unavailable', { status: moltbookStatus }))
+        }
+        // MCP introspection — return empty tools
+        return Promise.resolve(
+          new Response(JSON.stringify({ result: { tools: [] } }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          }),
+        )
+      }),
+    )
+  }
+
+  it('returns claimUrl in response when Moltbook registration succeeds', async () => {
+    mockMcpAndMoltbook(200, {
+      agentId: 'mb-agent-123',
+      claimUrl: 'https://moltbook.com/claim/mb-agent-123',
+    })
+
+    const res = await app.request('/api/v1/servers', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ...VALID_BODY,
+        createMoltbookAgent: true,
+        moltbookApiKey: 'mk-test-key-abc',
+      }),
+    })
+
+    expect(res.status).toBe(201)
+    const body = await res.json() as Record<string, string>
+    expect(body.claimUrl).toBe('https://moltbook.com/claim/mb-agent-123')
+    expect(body.serverId).toBeDefined()
+  })
+
+  it('stores moltbookAgentId in config after successful registration (AC5)', async () => {
+    mockMcpAndMoltbook(200, {
+      agentId: 'mb-agent-456',
+      claimUrl: 'https://moltbook.com/claim/mb-agent-456',
+    })
+
+    const res = await app.request('/api/v1/servers', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ...VALID_BODY,
+        createMoltbookAgent: true,
+        moltbookApiKey: 'mk-test-key-xyz',
+      }),
+    })
+
+    const { serverId } = await res.json() as Record<string, string>
+
+    const configJson = redis._store.get(`server:${serverId}:config`)!
+    const config = JSON.parse(configJson)
+    expect(config.moltbookAgentId).toBe('mb-agent-456')
+  })
+
+  it('server registration succeeds when Moltbook is unavailable — claimUrl is null (AC3, NFR14)', async () => {
+    mockMcpAndMoltbook(503)
+
+    const res = await app.request('/api/v1/servers', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ...VALID_BODY,
+        createMoltbookAgent: true,
+        moltbookApiKey: 'mk-test-key-fail',
+      }),
+    })
+
+    // Registration must succeed despite Moltbook failure
+    expect(res.status).toBe(201)
+    const body = await res.json() as Record<string, string | null>
+    expect(body.serverId).toBeDefined()
+    expect(body.gatewayUrl).toBeDefined()
+    expect(body.claimUrl).toBeNull()
+  })
+
+  it('moltbookApiKey does NOT appear in any Redis key value (AC4)', async () => {
+    const SECRET_KEY = 'mk-super-secret-api-key-99999'
+    mockMcpAndMoltbook(200, {
+      agentId: 'mb-agent-789',
+      claimUrl: 'https://moltbook.com/claim/mb-agent-789',
+    })
+
+    await app.request('/api/v1/servers', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ...VALID_BODY,
+        createMoltbookAgent: true,
+        moltbookApiKey: SECRET_KEY,
+      }),
+    })
+
+    // Inspect every Redis value — moltbookApiKey must not appear in any stored value
+    for (const [, value] of redis._store) {
+      expect(value).not.toContain(SECRET_KEY)
+    }
+  })
+
+  it('returns claimUrl: null when createMoltbookAgent is false (no Moltbook call)', async () => {
+    mockMcpTools([])
+
+    const res = await app.request('/api/v1/servers', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(VALID_BODY),
+    })
+
+    expect(res.status).toBe(201)
+    const body = await res.json() as Record<string, string | null>
+    expect(body.claimUrl).toBeNull()
   })
 })
 

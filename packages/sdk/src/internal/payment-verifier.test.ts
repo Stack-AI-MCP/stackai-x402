@@ -56,6 +56,12 @@ function makeRedis(returnValue: string | null = 'OK') {
     set: vi.fn().mockResolvedValue(returnValue),
     get: vi.fn().mockResolvedValue(null),
     del: vi.fn().mockResolvedValue(1),
+    scan: vi.fn().mockResolvedValue(['0', []]),
+    mget: vi.fn().mockResolvedValue([]),
+    incr: vi.fn().mockResolvedValue(1),
+    incrby: vi.fn().mockResolvedValue(1),
+    pfadd: vi.fn().mockResolvedValue(1),
+    pfcount: vi.fn().mockResolvedValue(0),
   }
 }
 
@@ -290,7 +296,17 @@ describe('Step 6 — REPLAY_DETECTED', () => {
 
   it('propagates raw Redis infrastructure errors (not wrapped as REPLAY_DETECTED)', async () => {
     const redisError = new Error('ECONNREFUSED: Redis unreachable')
-    const redis = { set: vi.fn().mockRejectedValue(redisError), get: vi.fn(), del: vi.fn() }
+    const redis = {
+      set: vi.fn().mockRejectedValue(redisError),
+      get: vi.fn(),
+      del: vi.fn(),
+      scan: vi.fn().mockResolvedValue(['0', []]),
+      mget: vi.fn().mockResolvedValue([]),
+      incr: vi.fn().mockResolvedValue(1),
+      incrby: vi.fn().mockResolvedValue(1),
+      pfadd: vi.fn().mockResolvedValue(1),
+      pfcount: vi.fn().mockResolvedValue(0),
+    }
 
     const err = await verifyPayment(baseParams({ redis })).catch((e) => e)
 

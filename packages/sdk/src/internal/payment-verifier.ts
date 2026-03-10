@@ -47,6 +47,14 @@ export interface RedisLike {
   scan(cursor: string, ...args: string[]): Promise<[string, string[]]>
   /** Fetch multiple keys in one round-trip. */
   mget(...keys: string[]): Promise<(string | null)[]>
+  /** Increment a key by 1. */
+  incr(key: string): Promise<number>
+  /** Increment a key by a specific amount. */
+  incrby(key: string, amount: number | string): Promise<number>
+  /** HyperLogLog add — probabilistic unique count. */
+  pfadd(key: string, ...elements: string[]): Promise<number>
+  /** HyperLogLog count — approximate unique element count. */
+  pfcount(key: string): Promise<number>
 }
 
 // ─── Parameters ───────────────────────────────────────────────────────────────

@@ -1,9 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import type { PaymentNotificationPayload } from '../services/notification.service.js'
+import type { ErrorRateAlertPayload } from 'stackai-x402/hooks'
 
 // ─── Mock BullMQ Worker ──────────────────────────────────────────────────────
 
-type ProcessorFn = (job: { data: PaymentNotificationPayload }) => Promise<void>
+type ProcessorFn = (job: { name?: string; data: any }) => Promise<void> // eslint-disable-line @typescript-eslint/no-explicit-any
 let capturedProcessor: ProcessorFn | null = null
 
 const mockWorkerClose = vi.fn().mockResolvedValue(undefined)
@@ -177,5 +178,96 @@ describe('notification.worker', () => {
     await expect(capturedProcessor!({ data: SAMPLE_DATA })).rejects.toThrow(
       'Webhook returned 500',
     )
+  })
+
+  // ─── Error-rate alert tests (Story 3-4) ─────────────────────────────────
+
+  describe('notify:error-rate-alert', () => {
+    const ALERT_DATA: ErrorRateAlertPayload = {
+      serverId: 'server-xyz',
+      errorRate: 0.15,
+    }
+
+    const MOLTBOOK_CONFIG = {
+      telegramChatId: '12345',
+      moltbookAgentId: 'agent-abc',
+      moltbookApiKey: 'moltbook-secret-key',
+    }
+
+    it('posts comment to Moltbook when agentId is configured (AC2)', async () => {
+      redis = makeRedis(JSON.stringify(MOLTBOOK_CONFIG))
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('OK', { status: 200 })))
+      createNotificationWorker({ redis, pubRedis, telegramBotToken: 'bot-token' })
+
+      await capturedProcessor!({ name: 'notify:error-rate-alert', data: ALERT_DATA })
+
+      expect(fetch).toHaveBeenCalledWith(
+        'https://api.moltbook.com/agents/agent-abc/comments',
+        expect.objectContaining({
+          method: 'POST',
+          headers: expect.objectContaining({
+            Authorization: 'Bearer moltbook-secret-key',
+          }),
+        }),
+      )
+    })
+
+    it('sends Telegram alert when chatId is configured', async () => {
+      redis = makeRedis(JSON.stringify(MOLTBOOK_CONFIG))
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('OK', { status: 200 })))
+      createNotificationWorker({ redis, pubRedis, telegramBotToken: 'bot-token' })
+
+      await capturedProcessor!({ name: 'notify:error-rate-alert', data: ALERT_DATA })
+
+      expect(mockSendMessage).toHaveBeenCalledWith(
+        '12345',
+        expect.stringContaining('error rate alert'),
+      )
+      const msg = mockSendMessage.mock.calls[0][1]
+      expect(msg).toContain('15.0%')
+    })
+
+    it('publishes error-rate-alert to pub/sub', async () => {
+      redis = makeRedis(JSON.stringify({ telegramChatId: '12345' }))
+      createNotificationWorker({ redis, pubRedis, telegramBotToken: 'bot-token' })
+
+      await capturedProcessor!({ name: 'notify:error-rate-alert', data: ALERT_DATA })
+
+      expect(pubRedis.publish).toHaveBeenCalledWith(
+        'notifications:server-xyz',
+        expect.stringContaining('"type":"error-rate-alert"'),
+      )
+    })
+
+    it('skips Moltbook silently when agentId is not configured', async () => {
+      redis = makeRedis(JSON.stringify({ telegramChatId: '12345' }))
+      createNotificationWorker({ redis, pubRedis, telegramBotToken: 'bot-token' })
+
+      await capturedProcessor!({ name: 'notify:error-rate-alert', data: ALERT_DATA })
+
+      // fetch not called (no Moltbook config)
+      expect(fetch).not.toHaveBeenCalled()
+    })
+
+    it('skips silently when server config not found', async () => {
+      redis = makeRedis(null)
+      createNotificationWorker({ redis, pubRedis, telegramBotToken: 'bot-token' })
+
+      await capturedProcessor!({ name: 'notify:error-rate-alert', data: ALERT_DATA })
+
+      expect(mockSendMessage).not.toHaveBeenCalled()
+      expect(fetch).not.toHaveBeenCalled()
+      expect(pubRedis.publish).not.toHaveBeenCalled()
+    })
+
+    it('throws on Moltbook failure to trigger BullMQ retry (AC6, NFR14)', async () => {
+      redis = makeRedis(JSON.stringify(MOLTBOOK_CONFIG))
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('Service Unavailable', { status: 503 })))
+      createNotificationWorker({ redis, pubRedis, telegramBotToken: 'bot-token' })
+
+      await expect(
+        capturedProcessor!({ name: 'notify:error-rate-alert', data: ALERT_DATA }),
+      ).rejects.toThrow('Moltbook returned 503')
+    })
   })
 })

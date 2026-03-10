@@ -1,6 +1,7 @@
 import { randomUUID, randomBytes } from 'node:crypto'
 import { encrypt } from 'stackai-x402/internal'
 import type { RedisLike } from 'stackai-x402/internal'
+import { registerMoltbookAgent } from 'stackai-x402/moltbook'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -20,6 +21,10 @@ export interface RegisterServerInput {
   upstreamAuth?: string
   telegramChatId?: string
   webhookUrl?: string
+  /** If true (and moltbookApiKey is provided), creates a Moltbook agent after registration */
+  createMoltbookAgent?: boolean
+  /** Used only for the one-time Moltbook API call — NEVER stored in Redis */
+  moltbookApiKey?: string
 }
 
 export interface IntrospectedTool {
@@ -43,6 +48,10 @@ export interface ServerConfig {
   telegramChatId?: string
   webhookUrl?: string
   createdAt: string
+  /** Operator-controlled status — 'disabled' blocks all proxy traffic (AC7, Story 3-3). */
+  status?: 'active' | 'disabled'
+  /** Moltbook agent ID — stored after successful Moltbook registration (Story 4.2, AC5) */
+  moltbookAgentId?: string
   // ownerKey is stored separately as server:{id}:ownerKey — NOT in this blob
 }
 
@@ -50,10 +59,52 @@ export interface RegisterServerResult {
   serverId: string
   gatewayUrl: string
   ownerKey: string
+  /** Moltbook claim URL — null if Moltbook registration was not requested or failed */
+  claimUrl?: string | null
 }
 
 // Re-export for use in app.ts / routes
 export type { RedisLike }
+
+// ─── SSRF guard ───────────────────────────────────────────────────────────────
+
+/**
+ * Regex covers the most common private/loopback ranges. DNS-rebinding attacks
+ * require additional mitigations (e.g. connecting-IP firewall rules) that are
+ * outside the scope of this service, but this blocks the obvious cases.
+ */
+const PRIVATE_HOST_RE =
+  /^(localhost|127\.|0\.0\.0\.0|::1|\[::1\]|10\.|192\.168\.|169\.254\.|172\.(1[6-9]|2\d|3[01])\.)/i
+
+/** Throws a descriptive Error when the URL is not a public HTTPS endpoint. */
+export function assertPublicUrl(rawUrl: string): void {
+  let parsed: URL
+  try {
+    parsed = new URL(rawUrl)
+  } catch {
+    throw new Error('Invalid URL')
+  }
+  if (parsed.protocol !== 'https:') {
+    throw new Error('Only HTTPS URLs are allowed')
+  }
+  if (PRIVATE_HOST_RE.test(parsed.hostname)) {
+    throw new Error('Requests to private or loopback addresses are not allowed')
+  }
+}
+
+// ─── Redis helpers ────────────────────────────────────────────────────────────
+
+/** Cursor-based SCAN — safe for production unlike KEYS which blocks Redis. */
+export async function scanAllKeys(redis: RedisLike, pattern: string): Promise<string[]> {
+  const keys: string[] = []
+  let cursor = '0'
+  do {
+    const [nextCursor, batch] = await redis.scan(cursor, 'MATCH', pattern, 'COUNT', '100')
+    cursor = nextCursor
+    keys.push(...batch)
+  } while (cursor !== '0')
+  return keys
+}
 
 // ─── MCP introspection ────────────────────────────────────────────────────────
 
@@ -107,6 +158,9 @@ export async function registerServer(
 ): Promise<RegisterServerResult> {
   const { redis, encryptionKey } = deps
 
+  // Validate upstream URL before doing anything — prevents SSRF
+  assertPublicUrl(input.url)
+
   const serverId = randomUUID()
   const ownerKey = randomBytes(32).toString('hex')
 
@@ -155,9 +209,36 @@ export async function registerServer(
     redis.set(`server:${serverId}:ownerKey`, ownerKey, ...TTL),
   ])
 
+  // Optional Moltbook agent registration — best-effort (NFR14)
+  // moltbookApiKey is NEVER stored in Redis — used for this call only (AC4)
+  let claimUrl: string | null = null
+  if (input.createMoltbookAgent && input.moltbookApiKey) {
+    try {
+      const moltbookResult = await registerMoltbookAgent({
+        serverConfig: {
+          name: input.name,
+          description: input.description ?? '',
+          toolNames: mcpTools.map((t) => t.name),
+          gatewayUrl: `/api/v1/proxy/${serverId}`,
+        },
+        moltbookApiKey: input.moltbookApiKey,
+      })
+
+      claimUrl = moltbookResult.claimUrl
+
+      // Store moltbookAgentId in config for later use (Story 3.4 alert) — AC5
+      const configWithAgent: ServerConfig = { ...config, moltbookAgentId: moltbookResult.agentId }
+      await redis.set(`server:${serverId}:config`, JSON.stringify(configWithAgent), 'KEEPTTL')
+    } catch (err) {
+      // Moltbook failure must not affect server registration (NFR14)
+      console.warn('Moltbook registration failed (non-fatal):', err instanceof Error ? err.message : err)
+    }
+  }
+
   return {
     serverId,
     gatewayUrl: `/api/v1/proxy/${serverId}`,
     ownerKey,
+    claimUrl,
   }
 }

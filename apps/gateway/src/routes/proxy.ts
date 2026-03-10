@@ -6,6 +6,7 @@ import type { AppEnv } from '../app.js'
 import type { ServerConfig, IntrospectedTool } from '../services/registration.service.js'
 import { processPayment } from '../services/payment.service.js'
 import { enqueuePaymentNotification } from '../services/notification.service.js'
+import type { Hook, RequestContext } from 'stackai-x402/hooks'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -53,6 +54,20 @@ async function callUpstream(
   })
 }
 
+// ─── Hook firing ──────────────────────────────────────────────────────────────
+
+/**
+ * Fires the hook chain via setImmediate — NEVER blocks the response (AC5, NFR3).
+ * Each hook error is silently swallowed (AC2).
+ */
+function fireHooks(hooks: Hook[], ctx: RequestContext): void {
+  for (const hook of hooks) {
+    setImmediate(() => hook.onRequest(ctx).catch((err) => {
+      console.warn('[hook] error (non-fatal):', err instanceof Error ? err.message : err)
+    }))
+  }
+}
+
 // ─── Shared handler ───────────────────────────────────────────────────────────
 
 async function handleProxy(c: Context<AppEnv>, serverId: string): Promise<Response> {
@@ -61,6 +76,9 @@ async function handleProxy(c: Context<AppEnv>, serverId: string): Promise<Respon
   const tokenPrices = c.get('tokenPrices')
   const encryptionKey = c.get('encryptionKey')
   const relayUrl = c.get('relayUrl')
+  const hooks = c.get('hooks')
+  const startTime = Date.now()
+  const timestamp = new Date().toISOString()
 
   // ── Parse JSON-RPC body first (gives 400 before 404 on bad body) ───────────
   let body: JsonRpcBody
@@ -88,6 +106,14 @@ async function handleProxy(c: Context<AppEnv>, serverId: string): Promise<Respon
   } catch {
     return c.json({ error: 'Server data is corrupted', code: 'INTERNAL_ERROR' }, 500)
   }
+
+  // ── Check disabled status (before any tool work or payment) ──────────────
+  if (config.status === 'disabled') {
+    return c.json({ error: 'Endpoint disabled', code: 'ENDPOINT_DISABLED' }, 503)
+  }
+
+  // Update lastSeen only for non-disabled servers (fire-and-forget, 30-day TTL)
+  redis.set(`server:${serverId}:lastSeen`, new Date().toISOString(), 'EX', 2_592_000).catch(() => {})
 
   // ── Find tool ──────────────────────────────────────────────────────────────
   const tool = tools.find((t) => t.name === body.method)
@@ -185,6 +211,11 @@ async function handleProxy(c: Context<AppEnv>, serverId: string): Promise<Respon
     try {
       upstreamRes = await callUpstream(body, config, upstreamAuthHeader)
     } catch (err) {
+      fireHooks(hooks, {
+        serverId, toolName: body.method, payer: senderAddress, txid,
+        amount: paidAmount, token: paidToken, success: false,
+        durationMs: Date.now() - startTime, timestamp,
+      })
       console.error(`Upstream error after payment [${serverId}]:`, err instanceof Error ? err.message : err)
       // AC 5: upstream failure after verified payment — return txid so caller can verify
       return c.json({ error: 'Upstream failed', code: 'UPSTREAM_ERROR', txid, explorerUrl }, 502)
@@ -192,6 +223,11 @@ async function handleProxy(c: Context<AppEnv>, serverId: string): Promise<Respon
 
     if (!upstreamRes.ok) {
       // AC 5: upstream returned non-OK after verified payment
+      fireHooks(hooks, {
+        serverId, toolName: body.method, payer: senderAddress, txid,
+        amount: paidAmount, token: paidToken, success: false,
+        durationMs: Date.now() - startTime, timestamp,
+      })
       return c.json({ error: 'Upstream failed', code: 'UPSTREAM_ERROR', txid, explorerUrl }, 502)
     }
 
@@ -218,13 +254,41 @@ async function handleProxy(c: Context<AppEnv>, serverId: string): Promise<Respon
       }).catch(() => {})
     })
 
+    // Fire hook chain — LoggingHook → X402MonetizationHook → AnalyticsHook (AC1)
+    fireHooks(hooks, {
+      serverId,
+      toolName: body.method,
+      payer: senderAddress,
+      txid,
+      amount: paidAmount,
+      token: paidToken,
+      success: true,
+      durationMs: Date.now() - startTime,
+      timestamp,
+    })
+
     return response
   }
 
   // ── Free tool: forward directly to upstream ────────────────────────────────
   try {
-    return await callUpstream(body, config, upstreamAuthHeader)
+    const freeRes = await callUpstream(body, config, upstreamAuthHeader)
+    fireHooks(hooks, {
+      serverId,
+      toolName: body.method,
+      success: freeRes.ok,
+      durationMs: Date.now() - startTime,
+      timestamp,
+    })
+    return freeRes
   } catch (err) {
+    fireHooks(hooks, {
+      serverId,
+      toolName: body.method,
+      success: false,
+      durationMs: Date.now() - startTime,
+      timestamp,
+    })
     console.error(`Upstream error [${serverId}]:`, err instanceof Error ? err.message : err)
     return c.json({ error: 'Upstream unavailable', code: 'UPSTREAM_ERROR' }, 502)
   }

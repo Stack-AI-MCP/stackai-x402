@@ -1,7 +1,7 @@
 import { timingSafeEqual } from 'node:crypto'
 import { Hono } from 'hono'
 import { z } from 'zod'
-import { registerServer, introspectTools } from '../services/registration.service.js'
+import { registerServer, introspectTools, assertPublicUrl, scanAllKeys } from '../services/registration.service.js'
 import type { ServerConfig, RedisLike } from '../services/registration.service.js'
 import type { AppEnv } from '../app.js'
 import { encrypt } from 'stackai-x402/internal'
@@ -20,10 +20,12 @@ const RegisterBodySchema = z.object({
       'recipientAddress must be a valid Stacks address (SP/ST/SM/SN prefix, min 40 chars)',
     ),
   acceptedTokens: z.array(z.enum(['STX', 'sBTC', 'USDCx'])).optional(),
-  toolPricing: z.record(z.string(), z.object({ price: z.number() })).optional(),
+  toolPricing: z.record(z.string(), z.object({ price: z.number().nonnegative() })).optional(),
   upstreamAuth: z.string().optional(),
   telegramChatId: z.string().optional(),
   webhookUrl: z.string().url().optional(),
+  moltbookApiKey: z.string().optional(),
+  createMoltbookAgent: z.boolean().optional(),
 })
 
 const PatchBodySchema = z.object({
@@ -39,20 +41,6 @@ const PatchBodySchema = z.object({
 }).strict()
 
 export const serversRouter = new Hono<AppEnv>()
-
-// ─── List: GET /api/v1/servers ──────────────────────────────────────────────
-
-/** Cursor-based SCAN — safe for production unlike KEYS which blocks Redis. */
-async function scanAllKeys(redis: RedisLike, pattern: string): Promise<string[]> {
-  const keys: string[] = []
-  let cursor = '0'
-  do {
-    const [nextCursor, batch] = await redis.scan(cursor, 'MATCH', pattern, 'COUNT', '100')
-    cursor = nextCursor
-    keys.push(...batch)
-  } while (cursor !== '0')
-  return keys
-}
 
 serversRouter.get('/', async (c) => {
   const redis = c.get('redis')
@@ -128,16 +116,11 @@ serversRouter.get('/introspect', async (c) => {
     return c.json({ error: 'url query parameter is required', code: 'INVALID_REQUEST' }, 400)
   }
 
-  let parsed: URL
+  // SSRF protection: reject non-HTTPS and private/loopback addresses
   try {
-    parsed = new URL(url)
-  } catch {
-    return c.json({ error: 'url must be a valid URL', code: 'INVALID_REQUEST' }, 400)
-  }
-
-  // SSRF protection: only allow HTTPS to prevent probing internal services
-  if (parsed.protocol !== 'https:') {
-    return c.json({ error: 'Only HTTPS URLs are accepted', code: 'INVALID_REQUEST' }, 400)
+    assertPublicUrl(url)
+  } catch (err) {
+    return c.json({ error: (err as Error).message, code: 'INVALID_REQUEST' }, 400)
   }
 
   // introspectTools has its own try/catch — always returns [] on failure, never throws
@@ -169,7 +152,11 @@ serversRouter.post('/', async (c) => {
       redis: c.get('redis'),
       encryptionKey: c.get('encryptionKey'),
     })
-    return c.json(result, 201)
+    // claimUrl is null when Moltbook was not requested or failed (AC3) — include in response
+    return c.json(
+      { serverId: result.serverId, gatewayUrl: result.gatewayUrl, ownerKey: result.ownerKey, claimUrl: result.claimUrl ?? null },
+      201,
+    )
   } catch (err) {
     console.error('Registration failed:', err instanceof Error ? err.message : err)
     return c.json({ error: 'Registration failed', code: 'REGISTRATION_FAILED' }, 500)
@@ -210,13 +197,15 @@ serversRouter.patch('/:serverId', async (c) => {
   const redis = c.get('redis')
   const encryptionKey = c.get('encryptionKey')
 
-  // Auth check — timing-safe comparison to prevent brute-force via response timing
+  // Auth check: constant-time comparison to prevent both timing oracle and key-length oracle
   const storedOwnerKey = await redis.get(`server:${serverId}:ownerKey`)
-  if (
-    storedOwnerKey === null ||
-    storedOwnerKey.length !== ownerKey.length ||
-    !timingSafeEqual(Buffer.from(storedOwnerKey), Buffer.from(ownerKey))
-  ) {
+  const ref = storedOwnerKey ?? '\0'.repeat(ownerKey.length)
+  const maxLen = Math.max(ref.length, ownerKey.length)
+  const bufA = Buffer.alloc(maxLen)
+  const bufB = Buffer.alloc(maxLen)
+  Buffer.from(ref).copy(bufA)
+  Buffer.from(ownerKey).copy(bufB)
+  if (!timingSafeEqual(bufA, bufB) || ref.length !== ownerKey.length || storedOwnerKey === null) {
     return c.json({ error: 'Unauthorized', code: 'UNAUTHORIZED' }, 403)
   }
 

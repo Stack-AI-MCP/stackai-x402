@@ -20,6 +20,16 @@
       "types": "./dist/client/index.d.ts",
       "import": "./dist/client/index.mjs",
       "require": "./dist/client/index.js"
+    },
+    "./hooks": {
+      "types": "./dist/hooks/index.d.ts",
+      "import": "./dist/hooks/index.mjs",
+      "require": "./dist/hooks/index.js"
+    },
+    "./moltbook": {
+      "types": "./dist/moltbook/index.d.ts",
+      "import": "./dist/moltbook/index.mjs",
+      "require": "./dist/moltbook/index.js"
     }
   },
   "scripts": {

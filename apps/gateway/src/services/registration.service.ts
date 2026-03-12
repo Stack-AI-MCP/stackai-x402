@@ -116,17 +116,19 @@ interface MCPTool {
 
 /**
  * Attempts a JSON-RPC `tools/list` call against the upstream MCP server.
- * Returns an empty array if the server is unreachable, times out (5 s),
- * or returns a non-JSON response (e.g. SSE). Registration is never blocked.
+ * Supports both plain JSON (legacy) and Streamable HTTP / SSE (MCP 2024-11-05 spec).
+ * Returns an empty array if the server is unreachable, times out, or returns unexpected data.
+ * Registration is never blocked by introspection failures.
  */
 export async function introspectTools(serverUrl: string): Promise<MCPTool[]> {
   try {
     const res = await fetch(serverUrl, {
       method: 'POST',
-      signal: AbortSignal.timeout(5_000),
+      signal: AbortSignal.timeout(8_000),
       headers: {
         'Content-Type': 'application/json',
-        Accept: 'application/json',
+        // MCP 2024-11-05 Streamable HTTP requires both content types in Accept
+        Accept: 'application/json, text/event-stream',
       },
       body: JSON.stringify({
         jsonrpc: '2.0',
@@ -138,12 +140,29 @@ export async function introspectTools(serverUrl: string): Promise<MCPTool[]> {
 
     if (!res.ok) return []
 
-    // Some MCP servers respond with SSE — skip if not plain JSON
     const ct = res.headers.get('content-type') ?? ''
-    if (!ct.includes('application/json')) return []
 
-    const data = (await res.json()) as { result?: { tools?: MCPTool[] } }
-    return data?.result?.tools ?? []
+    // Plain JSON response (legacy MCP transport)
+    if (ct.includes('application/json')) {
+      const data = (await res.json()) as { result?: { tools?: MCPTool[] } }
+      return data?.result?.tools ?? []
+    }
+
+    // SSE response (MCP 2024-11-05 Streamable HTTP transport)
+    if (ct.includes('text/event-stream')) {
+      const text = await res.text()
+      for (const line of text.split('\n')) {
+        if (!line.startsWith('data:')) continue
+        try {
+          const data = JSON.parse(line.slice(5).trim()) as { result?: { tools?: MCPTool[] } }
+          if (Array.isArray(data?.result?.tools)) return data.result.tools
+        } catch {
+          // skip malformed data lines
+        }
+      }
+    }
+
+    return []
   } catch {
     // Introspection failure is non-fatal — server may be offline at registration time
     return []

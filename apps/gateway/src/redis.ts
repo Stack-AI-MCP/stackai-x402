@@ -10,7 +10,7 @@ let _redis: Redis | null = null
 export function getRedis(): Redis {
   if (!_redis) {
     const config = parseConfig()
-    _redis = new Redis(config.REDIS_URL)
+    _redis = new Redis(config.REDIS_URL, { maxRetriesPerRequest: null })
   }
   return _redis
 }

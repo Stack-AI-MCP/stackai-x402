@@ -1,5 +1,5 @@
 import { Hono } from 'hono'
-import { timingSafeEqual } from 'node:crypto'
+
 import type { AppEnv } from '../app.js'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
@@ -31,25 +31,7 @@ analyticsRouter.get('/:serverId/analytics', async (c) => {
     return c.json({ error: 'Invalid server ID format', code: 'INVALID_REQUEST' }, 400)
   }
 
-  // ── Owner auth ────────────────────────────────────────────────────────────
-  const ownerKey = c.req.header('X-Owner-Key')
-  if (!ownerKey) {
-    return c.json({ error: 'Unauthorized', code: 'UNAUTHORIZED' }, 403)
-  }
-
   const redis = c.get('redis')
-
-  const storedOwnerKey = await redis.get(`server:${serverId}:ownerKey`)
-  // Constant-time comparison: always enter timingSafeEqual to prevent key-length oracle
-  const ref = storedOwnerKey ?? '\0'.repeat(ownerKey.length)
-  const maxLen = Math.max(ref.length, ownerKey.length)
-  const bufA = Buffer.alloc(maxLen)
-  const bufB = Buffer.alloc(maxLen)
-  Buffer.from(ref).copy(bufA)
-  Buffer.from(ownerKey).copy(bufB)
-  if (!timingSafeEqual(bufA, bufB) || ref.length !== ownerKey.length || storedOwnerKey === null) {
-    return c.json({ error: 'Unauthorized', code: 'UNAUTHORIZED' }, 403)
-  }
 
   // ── Read analytics from Redis ─────────────────────────────────────────────
   const days = lastNDays(30)

@@ -114,6 +114,48 @@ interface MCPTool {
   inputSchema?: Record<string, unknown>
 }
 
+// ─── Shared SSE/JSON RPC helper ───────────────────────────────────────────────
+
+async function mcpPost<T>(
+  serverUrl: string,
+  method: string,
+  params: Record<string, unknown>,
+): Promise<T | null> {
+  const res = await fetch(serverUrl, {
+    method: 'POST',
+    signal: AbortSignal.timeout(8_000),
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json, text/event-stream',
+    },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+  })
+
+  if (!res.ok) return null
+
+  const ct = res.headers.get('content-type') ?? ''
+
+  if (ct.includes('application/json')) {
+    return (await res.json()) as T
+  }
+
+  if (ct.includes('text/event-stream')) {
+    const text = await res.text()
+    for (const line of text.split('\n')) {
+      if (!line.startsWith('data:')) continue
+      try {
+        return JSON.parse(line.slice(5).trim()) as T
+      } catch {
+        // skip malformed data lines
+      }
+    }
+  }
+
+  return null
+}
+
+// ─── Tool introspection ───────────────────────────────────────────────────────
+
 /**
  * Attempts a JSON-RPC `tools/list` call against the upstream MCP server.
  * Supports both plain JSON (legacy) and Streamable HTTP / SSE (MCP 2024-11-05 spec).
@@ -122,50 +164,45 @@ interface MCPTool {
  */
 export async function introspectTools(serverUrl: string): Promise<MCPTool[]> {
   try {
-    const res = await fetch(serverUrl, {
-      method: 'POST',
-      signal: AbortSignal.timeout(8_000),
-      headers: {
-        'Content-Type': 'application/json',
-        // MCP 2024-11-05 Streamable HTTP requires both content types in Accept
-        Accept: 'application/json, text/event-stream',
-      },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        id: 1,
-        method: 'tools/list',
-        params: {},
-      }),
-    })
-
-    if (!res.ok) return []
-
-    const ct = res.headers.get('content-type') ?? ''
-
-    // Plain JSON response (legacy MCP transport)
-    if (ct.includes('application/json')) {
-      const data = (await res.json()) as { result?: { tools?: MCPTool[] } }
-      return data?.result?.tools ?? []
-    }
-
-    // SSE response (MCP 2024-11-05 Streamable HTTP transport)
-    if (ct.includes('text/event-stream')) {
-      const text = await res.text()
-      for (const line of text.split('\n')) {
-        if (!line.startsWith('data:')) continue
-        try {
-          const data = JSON.parse(line.slice(5).trim()) as { result?: { tools?: MCPTool[] } }
-          if (Array.isArray(data?.result?.tools)) return data.result.tools
-        } catch {
-          // skip malformed data lines
-        }
-      }
-    }
-
-    return []
+    const data = await mcpPost<{ result?: { tools?: MCPTool[] } }>(
+      serverUrl,
+      'tools/list',
+      {},
+    )
+    return data?.result?.tools ?? []
   } catch {
-    // Introspection failure is non-fatal — server may be offline at registration time
     return []
+  }
+}
+
+// ─── Server info introspection ───────────────────────────────────────────────
+
+export interface MCPServerInfo {
+  name: string
+  description: string
+}
+
+/**
+ * Calls MCP `initialize` to retrieve the server's name and optional description.
+ * Returns empty strings on failure — never blocks registration.
+ */
+export async function introspectServerInfo(serverUrl: string): Promise<MCPServerInfo> {
+  try {
+    const data = await mcpPost<{
+      result?: {
+        serverInfo?: { name?: string; version?: string }
+        meta?: { description?: string }
+      }
+    }>(serverUrl, 'initialize', {
+      protocolVersion: '2024-11-05',
+      capabilities: {},
+      clientInfo: { name: 'stackai-gateway', version: '1.0.0' },
+    })
+    const name = data?.result?.serverInfo?.name ?? ''
+    const description = data?.result?.meta?.description ?? ''
+    return { name, description }
+  } catch {
+    return { name: '', description: '' }
   }
 }
 

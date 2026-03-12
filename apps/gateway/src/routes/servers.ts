@@ -1,7 +1,7 @@
 import { timingSafeEqual } from 'node:crypto'
 import { Hono } from 'hono'
 import { z } from 'zod'
-import { registerServer, introspectTools, assertPublicUrl, scanAllKeys } from '../services/registration.service.js'
+import { registerServer, introspectTools, introspectServerInfo, assertPublicUrl, scanAllKeys } from '../services/registration.service.js'
 import type { ServerConfig, RedisLike } from '../services/registration.service.js'
 import type { AppEnv } from '../app.js'
 import { encrypt } from 'stackai-x402/internal'
@@ -123,9 +123,12 @@ serversRouter.get('/introspect', async (c) => {
     return c.json({ error: (err as Error).message, code: 'INVALID_REQUEST' }, 400)
   }
 
-  // introspectTools has its own try/catch — always returns [] on failure, never throws
-  const tools = await introspectTools(url)
-  return c.json({ tools }, 200)
+  // Both calls have their own try/catch — never throw, never block registration
+  const [tools, serverInfo] = await Promise.all([
+    introspectTools(url),
+    introspectServerInfo(url),
+  ])
+  return c.json({ tools, serverInfo }, 200)
 })
 
 // ─── Register: POST /api/v1/servers ─────────────────────────────────────────
@@ -160,6 +163,50 @@ serversRouter.post('/', async (c) => {
   } catch (err) {
     console.error('Registration failed:', err instanceof Error ? err.message : err)
     return c.json({ error: 'Registration failed', code: 'REGISTRATION_FAILED' }, 500)
+  }
+})
+
+// ─── Get Server: GET /api/v1/servers/:serverId ─────────────────────────────
+
+serversRouter.get('/:serverId', async (c) => {
+  const serverId = c.req.param('serverId')
+  const redis = c.get('redis')
+
+  if (!UUID_RE.test(serverId)) {
+    return c.json({ error: 'Invalid server ID format', code: 'INVALID_REQUEST' }, 400)
+  }
+
+  try {
+    const [configJson, toolsJson] = await Promise.all([
+      redis.get(`server:${serverId}:config`),
+      redis.get(`server:${serverId}:tools`),
+    ])
+
+    if (!configJson) {
+      return c.json({ error: 'Server not found', code: 'NOT_FOUND' }, 404)
+    }
+
+    let config: ServerConfig
+    let tools: any[] = []
+
+    try {
+      config = JSON.parse(configJson)
+      tools = toolsJson ? JSON.parse(toolsJson) : []
+    } catch {
+      return c.json({ error: 'Internal server error', code: 'INTERNAL_ERROR' }, 500)
+    }
+
+    // Strip sensitive fields
+    const { encryptedAuth: _, ...safeConfig } = config
+
+    return c.json({
+      ...safeConfig,
+      tools,
+      acceptedTokens: safeConfig.acceptedTokens ?? [],
+    }, 200)
+  } catch (err) {
+    console.error('Failed to get server:', err instanceof Error ? err.message : err)
+    return c.json({ error: 'Failed to get server', code: 'INTERNAL_ERROR' }, 500)
   }
 })
 

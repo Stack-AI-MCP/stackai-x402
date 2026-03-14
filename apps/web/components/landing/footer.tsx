@@ -39,15 +39,15 @@ export function Footer() {
                 className="rounded-lg"
               />
               <span className="font-mono text-sm font-semibold tracking-wider text-foreground">
-                STACKS<span className="text-primary">AI</span>
+                x<span className="text-primary">402</span>
               </span>
             </Link>
             <p className="text-sm text-muted-foreground max-w-xs mb-6 leading-relaxed">
-              The first comprehensive MCP payment gateway for the Bitcoin DeFi ecosystem. Accept sBTC, STX, and USDCx micropayments.
+              The first no-code x402 payment gateway for MCP servers on Stacks Bitcoin L2. Accept sBTC, STX, and USDCx micropayments.
             </p>
             <div className="flex items-center gap-3">
               <a
-                href="https://github.com/aibtcdev/stacks-ai"
+                href="https://github.com/aibtcdev/stackai-x402"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="flex items-center justify-center w-8 h-8 border border-border text-muted-foreground hover:text-foreground hover:border-primary/40 transition-colors"

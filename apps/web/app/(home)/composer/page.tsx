@@ -32,7 +32,7 @@ export default function ComposerPage() {
   )
 
   return (
-    <div className="max-w-2xl space-y-8 animate-in fade-in duration-500">
+    <div className="mx-auto max-w-2xl space-y-8 animate-in fade-in duration-500">
       {/* Header */}
       <div>
         <h1 className="font-host text-2xl font-bold tracking-tight">Composer</h1>

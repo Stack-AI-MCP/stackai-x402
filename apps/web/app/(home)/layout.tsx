@@ -25,7 +25,7 @@ export default function HomeLayout({
       </header>
 
       {/* Page content with consistent max-width + padding */}
-      <main className="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8 py-8 pb-24 md:pb-10">
+      <main className="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8 pt-10 pb-24 md:pb-12">
         {children}
       </main>
 

@@ -16,6 +16,7 @@ export interface RegisterServerInput {
   name: string
   description?: string
   recipientAddress: string
+  network?: 'mainnet' | 'testnet'
   acceptedTokens?: TokenType[]
   toolPricing?: Record<string, ToolPricingEntry>
   upstreamAuth?: string
@@ -41,6 +42,8 @@ export interface ServerConfig {
   description: string
   url: string
   recipientAddress: string
+  /** Per-server Stacks network — overrides the global NETWORK env var at proxy time */
+  network: 'mainnet' | 'testnet'
   acceptedTokens: TokenType[]
   toolPricing: Record<string, ToolPricingEntry>
   // Stored as `encryptedAuth` (camelCase) — arch doc calls it `upstream_auth_enc`
@@ -234,6 +237,7 @@ export async function registerServer(
     description: input.description ?? '',
     url: input.url,
     recipientAddress: input.recipientAddress,
+    network: input.network ?? 'mainnet',
     acceptedTokens,
     toolPricing,
     ...(encryptedAuth !== undefined && { encryptedAuth }),

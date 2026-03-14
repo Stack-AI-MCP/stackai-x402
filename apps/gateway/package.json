@@ -17,6 +17,7 @@
     "ioredis": "^5.10.0",
     "stackai-x402": "workspace:*",
     "uuid": "^13.0.0",
+    "x402-stacks": "^2.0.1",
     "zod": "^4.3.6"
   },
   "devDependencies": {

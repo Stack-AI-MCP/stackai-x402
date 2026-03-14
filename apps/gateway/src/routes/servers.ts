@@ -19,6 +19,7 @@ const RegisterBodySchema = z.object({
       STACKS_ADDRESS_RE,
       'recipientAddress must be a valid Stacks address (SP/ST/SM/SN prefix, min 40 chars)',
     ),
+  network: z.enum(['mainnet', 'testnet']).default('mainnet'),
   acceptedTokens: z.array(z.enum(['STX', 'sBTC', 'USDCx'])).optional(),
   toolPricing: z.record(z.string(), z.object({ price: z.number().nonnegative() })).optional(),
   upstreamAuth: z.string().optional(),

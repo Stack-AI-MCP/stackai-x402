@@ -1,10 +1,10 @@
 import { Hono } from 'hono'
 import type { Context } from 'hono'
-import { randomUUID } from 'node:crypto'
-import { usdToMicro, networkToCAIP2, decrypt, PaymentVerificationError } from 'stackai-x402/internal'
+import { X402PaymentVerifier, networkToCAIP2 } from 'x402-stacks'
+import type { PaymentPayloadV2, PaymentRequiredV2, PaymentRequirementsV2, SettlementResponseV2 } from 'x402-stacks'
+import { usdToMicro, decrypt } from 'stackai-x402/internal'
 import type { AppEnv } from '../app.js'
 import type { ServerConfig, IntrospectedTool } from '../services/registration.service.js'
-import { processPayment } from '../services/payment.service.js'
 import { enqueuePaymentNotification } from '../services/notification.service.js'
 import type { Hook, RequestContext } from 'stackai-x402/hooks'
 
@@ -17,13 +17,14 @@ interface JsonRpcBody {
   params?: unknown
 }
 
+/** Injectable settle function — defaults to X402PaymentVerifier in production, can be overridden in tests. */
+export type SettleFunction = (
+  payload: PaymentPayloadV2,
+  requirements: PaymentRequirementsV2,
+) => Promise<SettlementResponseV2>
+
 // ─── Upstream forwarding ──────────────────────────────────────────────────────
 
-/**
- * Forwards the JSON-RPC body to the upstream MCP server unchanged (NFR17).
- * Returns the upstream Response on success.
- * @throws on network failure (caller decides how to surface to client)
- */
 async function callUpstream(
   body: JsonRpcBody,
   config: ServerConfig,
@@ -31,7 +32,7 @@ async function callUpstream(
 ): Promise<Response> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
-    Accept: 'application/json',
+    Accept: 'application/json, text/event-stream',
   }
 
   if (upstreamAuthHeader) {
@@ -56,10 +57,6 @@ async function callUpstream(
 
 // ─── Hook firing ──────────────────────────────────────────────────────────────
 
-/**
- * Fires the hook chain via setImmediate — NEVER blocks the response (AC5, NFR3).
- * Each hook error is silently swallowed (AC2).
- */
 function fireHooks(hooks: Hook[], ctx: RequestContext): void {
   for (const hook of hooks) {
     setImmediate(() => hook.onRequest(ctx).catch((err) => {
@@ -70,17 +67,16 @@ function fireHooks(hooks: Hook[], ctx: RequestContext): void {
 
 // ─── Shared handler ───────────────────────────────────────────────────────────
 
-async function handleProxy(c: Context<AppEnv>, serverId: string): Promise<Response> {
+export async function handleProxy(c: Context<AppEnv>, serverId: string): Promise<Response> {
   const redis = c.get('redis')
-  const network = c.get('network')
   const tokenPrices = c.get('tokenPrices')
   const encryptionKey = c.get('encryptionKey')
-  const relayUrl = c.get('relayUrl')
   const hooks = c.get('hooks')
+  const settleOverride = c.get('settlePayment')
   const startTime = Date.now()
   const timestamp = new Date().toISOString()
 
-  // ── Parse JSON-RPC body first (gives 400 before 404 on bad body) ───────────
+  // ── Parse JSON-RPC body first ────────────────────────────────────────────
   let body: JsonRpcBody
   try {
     body = (await c.req.json()) as JsonRpcBody
@@ -88,7 +84,7 @@ async function handleProxy(c: Context<AppEnv>, serverId: string): Promise<Respon
     return c.json({ error: 'Invalid JSON body', code: 'INVALID_REQUEST' }, 400)
   }
 
-  // ── Load server config + tools from Redis ──────────────────────────────────
+  // ── Load server config + tools from Redis ────────────────────────────────
   const [configJson, toolsJson] = await Promise.all([
     redis.get(`server:${serverId}:config`),
     redis.get(`server:${serverId}:tools`),
@@ -107,23 +103,27 @@ async function handleProxy(c: Context<AppEnv>, serverId: string): Promise<Respon
     return c.json({ error: 'Server data is corrupted', code: 'INTERNAL_ERROR' }, 500)
   }
 
-  // ── Check disabled status (before any tool work or payment) ──────────────
+  const network: 'mainnet' | 'testnet' = config.network ?? 'mainnet'
+  const relayUrl = network === 'testnet' ? c.get('testnetRelayUrl') : c.get('relayUrl')
+
   if (config.status === 'disabled') {
     return c.json({ error: 'Endpoint disabled', code: 'ENDPOINT_DISABLED' }, 503)
   }
 
-  // Update lastSeen only for non-disabled servers (fire-and-forget, 30-day TTL)
   redis.set(`server:${serverId}:lastSeen`, new Date().toISOString(), 'EX', 2_592_000).catch(() => {})
 
   // ── Find tool ──────────────────────────────────────────────────────────────
-  const tool = tools.find((t) => t.name === body.method)
-  if (!tool) {
-    return c.json({ error: 'Tool not found', code: 'TOOL_NOT_FOUND' }, 404)
+  let toolName = body.method
+  if (body.method === 'tools/call' && body.params && typeof body.params === 'object') {
+    toolName = (body.params as any).name
   }
 
-  // ── Decrypt upstream auth header early (before any payment) ───────────────
-  // Decryption failure (bad key, tampered ciphertext) is an operator config error,
-  // not a payment error — return 500 rather than leaking txid in a 502.
+  const tool = tools.find((t) => t.name === toolName)
+  if (!tool) {
+    return c.json({ error: `Tool '${toolName}' not found`, code: 'TOOL_NOT_FOUND' }, 404)
+  }
+
+  // ── Decrypt upstream auth header ─────────────────────────────────────────
   let upstreamAuthHeader: string | undefined
   if (config.encryptedAuth) {
     try {
@@ -139,74 +139,70 @@ async function handleProxy(c: Context<AppEnv>, serverId: string): Promise<Respon
     const paymentSig = c.req.header('payment-signature')
 
     if (!paymentSig) {
-      // No payment yet — issue 402 with payment requirements
-      const paymentIdentifier = randomUUID()
+      // No payment yet — issue 402 with V2 Coinbase-compatible payment requirements
       const caip2 = networkToCAIP2(network)
 
-      // AC7: use config.acceptedTokens (server-level), not tool.acceptedTokens.
-      const price: Record<string, string> = {}
-      for (const token of config.acceptedTokens) {
-        price[token] = usdToMicro(tool.price, token, tokenPrices[token]).toString()
-      }
-
-      const payload = {
-        version: 2,
+      // Build one PaymentRequirementsV2 entry per accepted token
+      const accepts: PaymentRequirementsV2[] = config.acceptedTokens.map((token) => ({
+        scheme: 'exact',
         network: caip2,
+        amount: usdToMicro(tool.price, token, tokenPrices[token]).toString(),
+        asset: token,
         payTo: config.recipientAddress,
-        price,
-        paymentIdentifier,
+        maxTimeoutSeconds: 300,
+      }))
+
+      const paymentRequired: PaymentRequiredV2 = {
+        x402Version: 2,
+        resource: { url: c.req.url },
+        accepts,
       }
 
-      // Header name MUST be lowercase — x402 spec mandates `payment-required`
-      c.header('payment-required', Buffer.from(JSON.stringify(payload)).toString('base64'))
+      c.header('payment-required', Buffer.from(JSON.stringify(paymentRequired)).toString('base64'))
       return c.json({ error: 'Payment required', code: 'PAYMENT_REQUIRED' }, 402)
     }
 
-    // Payment signature present — require the paymentId for replay protection
-    const paymentId = c.req.header('payment-id')
-    if (!paymentId) {
-      return c.json(
-        { error: 'payment-id header required when payment-signature is present', code: 'INVALID_REQUEST' },
-        400,
-      )
-    }
-
-    // Verify payment via 6-step engine (AC 1, 2, 3, 4, 5, 6)
-    let txid: string
-    let explorerUrl: string
-    let paidToken: string
-    let paidAmount: string
-    let senderAddress: string
+    // Payment signature present — decode PaymentPayloadV2
+    let paymentPayload: PaymentPayloadV2
     try {
-      const result = await processPayment({
-        paymentSignature: paymentSig,
-        paymentId,
-        tool,
-        config,
-        network,
-        tokenPrices,
-        redis,
-        relayUrl,
-      })
-      txid = result.txid
-      explorerUrl = result.explorerUrl
-      paidToken = result.tokenType
-      paidAmount = result.amount
-      senderAddress = result.senderAddress
-    } catch (err) {
-      if (err instanceof PaymentVerificationError) {
-        if (err.code === 'RELAY_FAILED') {
-          // AC 6: relay unreachable → 503
-          return c.json({ error: 'Relay unavailable', code: 'RELAY_UNAVAILABLE' }, 503)
-        }
-        // All other verification errors → 402 with error code
-        return c.json({ error: err.message, code: err.code }, 402)
-      }
-      // Raw infrastructure error (Redis down etc.) → propagates to global handler → 500
-      throw err
+      const decoded = Buffer.from(paymentSig, 'base64').toString('utf-8')
+      paymentPayload = JSON.parse(decoded) as PaymentPayloadV2
+    } catch {
+      return c.json({ error: 'Invalid payment-signature: must be base64-encoded PaymentPayloadV2 JSON', code: 'INVALID_REQUEST' }, 400)
     }
 
-    // Payment verified — forward to upstream (AC 3, 4)
+    // Settle payment via relay (X402PaymentVerifier or injected test override)
+    const doSettle: SettleFunction = settleOverride ?? (async (payload, requirements) => {
+      const verifier = new X402PaymentVerifier(relayUrl)
+      return verifier.settle(payload, { paymentRequirements: requirements })
+    })
+
+    let settlement: SettlementResponseV2
+    try {
+      settlement = await doSettle(paymentPayload, paymentPayload.accepted)
+    } catch (err) {
+      console.error(`Relay error for server ${serverId}:`, err instanceof Error ? err.message : err)
+      return c.json({ error: 'Relay unavailable', code: 'RELAY_UNAVAILABLE' }, 503)
+    }
+
+    if (!settlement.success) {
+      return c.json({ error: settlement.errorReason ?? 'Payment verification failed', code: 'PAYMENT_FAILED' }, 402)
+    }
+
+    // Dedup by txid — atomic NX; Stacks nonce prevents chain-level replay
+    const txid = settlement.transaction
+    const nx = await redis.set(`payment:${txid}`, 'used', 'NX', 'EX', 2_592_000)
+    if (nx === null) {
+      return c.json({ error: 'Payment already processed', code: 'REPLAY_DETECTED' }, 402)
+    }
+
+    const paidToken = paymentPayload.accepted.asset
+    const paidAmount = paymentPayload.accepted.amount
+    const senderAddress = settlement.payer ?? ''
+    const chain = network === 'mainnet' ? 'mainnet' : 'testnet'
+    const explorerUrl = `https://explorer.hiro.so/txid/${txid}?chain=${chain}`
+
+    // Forward to upstream
     let upstreamRes: Response
     try {
       upstreamRes = await callUpstream(body, config, upstreamAuthHeader)
@@ -217,12 +213,10 @@ async function handleProxy(c: Context<AppEnv>, serverId: string): Promise<Respon
         durationMs: Date.now() - startTime, timestamp,
       })
       console.error(`Upstream error after payment [${serverId}]:`, err instanceof Error ? err.message : err)
-      // AC 5: upstream failure after verified payment — return txid so caller can verify
       return c.json({ error: 'Upstream failed', code: 'UPSTREAM_ERROR', txid, explorerUrl }, 502)
     }
 
     if (!upstreamRes.ok) {
-      // AC 5: upstream returned non-OK after verified payment
       fireHooks(hooks, {
         serverId, toolName: body.method, payer: senderAddress, txid,
         amount: paidAmount, token: paidToken, success: false,
@@ -231,8 +225,7 @@ async function handleProxy(c: Context<AppEnv>, serverId: string): Promise<Respon
       return c.json({ error: 'Upstream failed', code: 'UPSTREAM_ERROR', txid, explorerUrl }, 502)
     }
 
-    // AC 8: success — rebuild response with payment-response header (base64-encoded { txid, explorerUrl })
-    // c.header() does not merge into a raw Response; we must include it explicitly.
+    // Success — attach payment-response header
     const paymentResponse = Buffer.from(JSON.stringify({ txid, explorerUrl })).toString('base64')
     const response = new Response(await upstreamRes.text(), {
       status: upstreamRes.status,
@@ -242,7 +235,6 @@ async function handleProxy(c: Context<AppEnv>, serverId: string): Promise<Respon
       },
     })
 
-    // Fire-and-forget notification — NEVER delays the gateway response (NFR3, AC1)
     setImmediate(() => {
       enqueuePaymentNotification(redis, {
         serverId,
@@ -254,7 +246,6 @@ async function handleProxy(c: Context<AppEnv>, serverId: string): Promise<Respon
       }).catch(() => {})
     })
 
-    // Fire hook chain — LoggingHook → X402MonetizationHook → AnalyticsHook (AC1)
     fireHooks(hooks, {
       serverId,
       toolName: body.method,
@@ -298,7 +289,5 @@ async function handleProxy(c: Context<AppEnv>, serverId: string): Promise<Respon
 
 export const proxyRouter = new Hono<AppEnv>()
 
-// JSON-RPC is always POST. Restricting to .post() avoids misleading INVALID_REQUEST
-// errors for GET/DELETE requests that have no body to parse.
 proxyRouter.post('/:serverId', (c) => handleProxy(c, c.req.param('serverId')))
 proxyRouter.post('/:serverId/*', (c) => handleProxy(c, c.req.param('serverId')))

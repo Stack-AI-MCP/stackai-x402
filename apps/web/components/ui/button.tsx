@@ -1,0 +1,79 @@
+import * as React from "react";
+import { Slot } from "@radix-ui/react-slot";
+import { cva, type VariantProps } from "class-variance-authority";
+
+import { cn } from "@/lib/utils";
+
+const buttonVariants = cva(
+  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
+  {
+    variants: {
+      variant: {
+        default: "bg-primary text-primary-foreground hover:bg-primary/90",
+        destructive:
+          "bg-destructive text-destructive-foreground hover:bg-destructive/90",
+        outline:
+          "border border-input bg-background hover:bg-accent hover:text-accent-foreground",
+        secondary:
+          "bg-secondary text-secondary-foreground hover:bg-secondary/80",
+        ghost: "hover:bg-accent hover:text-accent-foreground",
+        link: "text-primary underline-offset-4 hover:underline",
+        accent:
+          "bg-theme-orange text-black hover:bg-theme-orange-dark font-bold",
+
+        // ── Cronos402 variants ─────────────────────────────────────────────
+        // Primary: foreground on background (inverted), sharp corners, mono
+        customTallPrimary:
+          "bg-foreground text-background font-mono tracking-wider uppercase text-sm rounded-[2px] hover:bg-foreground/90 transition-all duration-200",
+        // Secondary: muted bg
+        customTallSecondary:
+          "bg-muted text-foreground font-mono tracking-wider uppercase text-sm rounded-[2px] hover:bg-muted/90 transition-all duration-200",
+        // Accent: electric cyan teal
+        customTallAccent:
+          "text-teal-700 bg-teal-500/10 hover:bg-teal-500/20 dark:text-teal-200 dark:bg-teal-800/50 dark:hover:bg-teal-800/70 font-mono tracking-wider uppercase text-sm rounded-[2px] transition-all duration-300",
+        // Ghost teal: cyan text + light teal bg
+        ghostCustom:
+          "text-teal-700 font-mono tracking-wider uppercase text-[13px] bg-teal-500/10 hover:bg-teal-500/20 rounded-[2px] dark:text-teal-200 dark:bg-teal-800/50 dark:hover:bg-teal-800/70 transition-all duration-300",
+        // Ghost secondary: muted text
+        ghostCustomSecondary:
+          "text-foreground font-mono tracking-wider uppercase text-[13px] bg-muted-foreground/10 dark:bg-muted-foreground/20 dark:hover:bg-muted-foreground/30 hover:bg-muted-foreground/20 rounded-[2px] transition-all duration-300",
+        // Navy primary (explicit blue)
+        navyPrimary:
+          "bg-primary text-primary-foreground font-mono tracking-wider uppercase text-sm rounded-[2px] hover:bg-primary/90 transition-all duration-200",
+      },
+      size: {
+        default: "h-10 px-4 py-2",
+        sm: "h-9 rounded-md px-3",
+        lg: "h-11 rounded-md px-8",
+        tall: "h-14 px-8",
+        icon: "h-10 w-10",
+      },
+    },
+    defaultVariants: {
+      variant: "default",
+      size: "default",
+    },
+  }
+);
+
+export interface ButtonProps
+  extends React.ButtonHTMLAttributes<HTMLButtonElement>,
+    VariantProps<typeof buttonVariants> {
+  asChild?: boolean;
+}
+
+const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
+  ({ className, variant, size, asChild = false, ...props }, ref) => {
+    const Comp = asChild ? Slot : "button";
+    return (
+      <Comp
+        className={cn(buttonVariants({ variant, size, className }))}
+        ref={ref}
+        {...props}
+      />
+    );
+  }
+);
+Button.displayName = "Button";
+
+export { Button, buttonVariants };

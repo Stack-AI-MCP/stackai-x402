@@ -1,5 +1,5 @@
 import type { Hook, RequestContext } from './hook.interface.js'
-import type { RedisLike } from '../internal/payment-verifier.js'
+import type { RedisLike } from '../internal/index.js'
 
 /** Payload emitted when a server exceeds the error rate threshold. */
 export interface ErrorRateAlertPayload {

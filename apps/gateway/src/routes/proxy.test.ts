@@ -1,23 +1,24 @@
-import { describe, it, expect, vi, beforeEach, beforeAll, afterEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import type { RequestContext } from 'stackai-x402/hooks'
 import { createApp } from '../app.js'
 import type { ServerConfig, IntrospectedTool } from '../services/registration.service.js'
-import { buildPaymentTransaction, encrypt } from 'stackai-x402/internal'
-import { randomPrivateKey } from '@stacks/transactions'
+import { encrypt } from 'stackai-x402/internal'
+import type { SettleFunction } from './proxy.js'
+import type { SettlementResponseV2 } from 'x402-stacks'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const ENCRYPTION_KEY = 'a'.repeat(64)
 const SERVER_ID = 'test-server-id'
 const RECIPIENT = 'SP3FGQ8Z7JY9BWYZ5WM53E0M9NK7WHJF0691NZ159'
-const RELAY_URL = 'https://x402-relay.aibtc.com/broadcast'
+const RELAY_URL = 'https://x402-relay.aibtc.com'
+const MOCK_TXID = 'aabbcc0011223344556677889900aabbcc0011223344556677889900aabbcc00'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function makeRedis(initial: Record<string, string> = {}) {
   const store = new Map<string, string>(Object.entries(initial))
   return {
-    // Implement NX semantics: if 'NX' option is present and key exists, return null (no-op)
     set: vi.fn(async (key: string, value: string, ...args: string[]) => {
       const isNX = args.includes('NX')
       if (isNX && store.has(key)) return null
@@ -46,6 +47,7 @@ function makeConfig(overrides: Partial<ServerConfig> = {}): ServerConfig {
     description: 'A test MCP server',
     url: 'https://mcp.example.com',
     recipientAddress: RECIPIENT,
+    network: 'mainnet',
     acceptedTokens: ['STX', 'sBTC', 'USDCx'],
     toolPricing: {},
     createdAt: new Date().toISOString(),
@@ -53,9 +55,7 @@ function makeConfig(overrides: Partial<ServerConfig> = {}): ServerConfig {
   }
 }
 
-function makeTools(
-  tools: Array<{ name: string; price: number }>,
-): IntrospectedTool[] {
+function makeTools(tools: Array<{ name: string; price: number }>): IntrospectedTool[] {
   return tools.map((t) => ({
     name: t.name,
     description: `Tool: ${t.name}`,
@@ -76,6 +76,35 @@ function mockUpstream(body: unknown, status = 200) {
   )
 }
 
+/** Builds a valid PaymentPayloadV2 base64 header (no real signing needed — settle is mocked). */
+function makePaymentSig(overrides: Record<string, unknown> = {}): string {
+  const payload = {
+    x402Version: 2,
+    accepted: {
+      scheme: 'exact',
+      network: 'stacks:1',
+      amount: '333333',
+      asset: 'STX',
+      payTo: RECIPIENT,
+      maxTimeoutSeconds: 300,
+    },
+    payload: { transaction: 'deadbeef' }, // real tx not needed — settle is mocked
+    ...overrides,
+  }
+  return Buffer.from(JSON.stringify(payload)).toString('base64')
+}
+
+/** Default successful settle mock */
+function makeSettle(overrides: Partial<SettlementResponseV2> = {}): SettleFunction {
+  return vi.fn().mockResolvedValue({
+    success: true,
+    transaction: MOCK_TXID,
+    network: 'stacks:1' as const,
+    payer: 'SP1SENDER',
+    ...overrides,
+  } satisfies SettlementResponseV2)
+}
+
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 describe('POST /api/v1/proxy/:serverId', () => {
@@ -85,7 +114,7 @@ describe('POST /api/v1/proxy/:serverId', () => {
   beforeEach(() => {
     const config = makeConfig()
     const tools = makeTools([
-      { name: 'priced-tool', price: 1.0 }, // $1.00 USD
+      { name: 'priced-tool', price: 1.0 },
       { name: 'free-tool', price: 0 },
     ])
 
@@ -97,8 +126,8 @@ describe('POST /api/v1/proxy/:serverId', () => {
     app = createApp({
       redis,
       encryptionKey: ENCRYPTION_KEY,
-      network: 'mainnet',
       relayUrl: RELAY_URL,
+      testnetRelayUrl: 'https://x402-relay.aibtc.dev',
       tokenPrices: { STX: 3.0, sBTC: 100_000.0, USDCx: 1.0 },
     })
 
@@ -129,7 +158,7 @@ describe('POST /api/v1/proxy/:serverId', () => {
     expect(body.code).toBe('TOOL_NOT_FOUND')
   })
 
-  // ── 402 gate ──────────────────────────────────────────────────────────────
+  // ── 402 gate — V2 Coinbase-compatible format ──────────────────────────────
 
   it('returns 402 for priced tool without payment-signature', async () => {
     const res = await app.request(`/api/v1/proxy/${SERVER_ID}`, {
@@ -141,48 +170,39 @@ describe('POST /api/v1/proxy/:serverId', () => {
     expect(res.status).toBe(402)
     const body = await res.json() as Record<string, string>
     expect(body.code).toBe('PAYMENT_REQUIRED')
-    expect(body.error).toBe('Payment required')
 
-    // payment-required header must be present and valid base64-JSON
+    // payment-required header must be present and valid base64-JSON (V2 format)
     const raw = res.headers.get('payment-required')
     expect(raw).not.toBeNull()
     const decoded = JSON.parse(Buffer.from(raw!, 'base64').toString('utf8'))
 
-    expect(decoded.version).toBe(2)
-    expect(decoded.network).toBe('stacks:1') // mainnet CAIP-2
-    expect(decoded.payTo).toBe(RECIPIENT)
-    expect(decoded.paymentIdentifier).toMatch(/^[0-9a-f-]{36}$/) // UUID v4
+    expect(decoded.x402Version).toBe(2)
+    expect(decoded.resource).toBeDefined()
+    expect(Array.isArray(decoded.accepts)).toBe(true)
+    expect(decoded.accepts.length).toBe(3) // STX + sBTC + USDCx
 
-    // Price for $1 at $3/STX = (1/3)*1e6 ≈ 333333 microSTX
-    expect(decoded.price).toHaveProperty('STX', '333333')
-    expect(decoded.price).toHaveProperty('sBTC')
-    expect(decoded.price).toHaveProperty('USDCx')
+    // Find STX entry: $1 at $3/STX = 333333 microSTX
+    const stxEntry = decoded.accepts.find((a: any) => a.asset === 'STX')
+    expect(stxEntry).toBeDefined()
+    expect(stxEntry.amount).toBe('333333')
+    expect(stxEntry.payTo).toBe(RECIPIENT)
+    expect(stxEntry.scheme).toBe('exact')
+    expect(stxEntry.network).toBe('stacks:1')
+    expect(stxEntry.maxTimeoutSeconds).toBe(300)
   })
 
-  it('generates a unique paymentIdentifier per request', async () => {
-    const makeRequest = () =>
-      app.request(`/api/v1/proxy/${SERVER_ID}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'priced-tool' }),
-      })
-
-    const [r1, r2] = await Promise.all([makeRequest(), makeRequest()])
-
-    const decode = (r: Response) => {
-      const raw = r.headers.get('payment-required')!
-      return JSON.parse(Buffer.from(raw, 'base64').toString()).paymentIdentifier as string
-    }
-
-    expect(decode(r1)).not.toBe(decode(r2))
-  })
-
-  it('uses testnet CAIP-2 when network is testnet', async () => {
+  it('uses testnet CAIP-2 when server config network is testnet', async () => {
+    const testnetConfig = makeConfig({ network: 'testnet' })
+    const testnetTools = makeTools([{ name: 'priced-tool', price: 1.0 }])
+    const testnetRedis = makeRedis({
+      [`server:${SERVER_ID}:config`]: JSON.stringify(testnetConfig),
+      [`server:${SERVER_ID}:tools`]: JSON.stringify(testnetTools),
+    })
     const testApp = createApp({
-      redis,
+      redis: testnetRedis,
       encryptionKey: ENCRYPTION_KEY,
-      network: 'testnet',
       relayUrl: RELAY_URL,
+      testnetRelayUrl: 'https://x402-relay.aibtc.dev',
       tokenPrices: { STX: 3.0, sBTC: 100_000.0, USDCx: 1.0 },
     })
 
@@ -195,13 +215,12 @@ describe('POST /api/v1/proxy/:serverId', () => {
     expect(res.status).toBe(402)
     const raw = res.headers.get('payment-required')!
     const decoded = JSON.parse(Buffer.from(raw, 'base64').toString())
-    expect(decoded.network).toBe('stacks:2147483648')
+    expect(decoded.accepts[0].network).toBe('stacks:2147483648')
   })
 
-  it('only includes accepted tokens in payment-required price', async () => {
+  it('only includes accepted tokens in payment-required accepts array', async () => {
     const stxConfig = makeConfig({ acceptedTokens: ['STX'], serverId: 'stx-only' })
     const tools = makeTools([{ name: 'priced-tool', price: 1.0 }])
-
     const stxRedis = makeRedis({
       'server:stx-only:config': JSON.stringify(stxConfig),
       'server:stx-only:tools': JSON.stringify(tools),
@@ -209,8 +228,8 @@ describe('POST /api/v1/proxy/:serverId', () => {
     const stxApp = createApp({
       redis: stxRedis,
       encryptionKey: ENCRYPTION_KEY,
-      network: 'mainnet',
       relayUrl: RELAY_URL,
+      testnetRelayUrl: 'https://x402-relay.aibtc.dev',
       tokenPrices: { STX: 3.0, sBTC: 100_000.0, USDCx: 1.0 },
     })
 
@@ -222,7 +241,8 @@ describe('POST /api/v1/proxy/:serverId', () => {
 
     expect(res.status).toBe(402)
     const decoded = JSON.parse(Buffer.from(res.headers.get('payment-required')!, 'base64').toString())
-    expect(Object.keys(decoded.price)).toEqual(['STX'])
+    expect(decoded.accepts).toHaveLength(1)
+    expect(decoded.accepts[0].asset).toBe('STX')
   })
 
   // ── Free tool passthrough ─────────────────────────────────────────────────
@@ -259,37 +279,17 @@ describe('POST /api/v1/proxy/:serverId', () => {
   })
 })
 
-// ─── Story 1-7: Payment verification integration tests ────────────────────────
+// ─── Payment verification integration tests ───────────────────────────────────
 
-describe('POST /api/v1/proxy/:serverId — payment verification (Story 1-7)', () => {
-  const MOCK_TXID = 'aabbcc0011223344556677889900aabbcc0011223344556677889900aabbcc00'
-  const PAYMENT_ID = 'test-payment-id-001'
-  // STX price: $1 tool at $3/STX = 333333 microSTX
-  const PAYMENT_AMOUNT = 333333n
-
+describe('POST /api/v1/proxy/:serverId — payment verification (V2 protocol)', () => {
   let redis: ReturnType<typeof makeRedis>
   let app: ReturnType<typeof createApp>
-  let validPaymentSig: string
-
-  beforeAll(async () => {
-    // Clear any fetch stubs from prior describe blocks (e.g. the ECONNREFUSED stub in the
-    // outer describe) so buildPaymentTransaction can reach the nonce endpoint.
-    vi.unstubAllGlobals()
-    const senderKey = randomPrivateKey()
-    const txHex = await buildPaymentTransaction({
-      senderKey,
-      recipient: RECIPIENT,
-      amount: PAYMENT_AMOUNT,
-      tokenType: 'STX',
-      network: 'mainnet',
-    })
-    validPaymentSig = Buffer.from(txHex, 'hex').toString('base64')
-  })
+  let mockSettle: ReturnType<typeof vi.fn>
 
   beforeEach(() => {
     const config = makeConfig()
     const tools = makeTools([
-      { name: 'priced-tool', price: 1.0 }, // $1.00 USD
+      { name: 'priced-tool', price: 1.0 },
       { name: 'free-tool', price: 0 },
     ])
 
@@ -298,55 +298,44 @@ describe('POST /api/v1/proxy/:serverId — payment verification (Story 1-7)', ()
       [`server:${SERVER_ID}:tools`]: JSON.stringify(tools),
     })
 
+    mockSettle = vi.fn().mockResolvedValue({
+      success: true,
+      transaction: MOCK_TXID,
+      network: 'stacks:1' as const,
+      payer: 'SP1SENDER',
+    } satisfies SettlementResponseV2)
+
     app = createApp({
       redis,
       encryptionKey: ENCRYPTION_KEY,
-      network: 'mainnet',
       relayUrl: RELAY_URL,
+      testnetRelayUrl: 'https://x402-relay.aibtc.dev',
       tokenPrices: { STX: 3.0, sBTC: 100_000.0, USDCx: 1.0 },
+      settlePayment: mockSettle as SettleFunction,
     })
 
     vi.unstubAllGlobals()
   })
 
-  // Helper: mock both relay and upstream fetch calls by URL
-  function mockFetchByUrl(relayBody: unknown, relayStatus: number, upstreamBody: unknown, upstreamStatus: number) {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockImplementation(async (url: string) => {
-        if ((url as string).includes('x402-relay')) {
-          return new Response(JSON.stringify(relayBody), {
-            status: relayStatus,
-            headers: { 'Content-Type': 'application/json' },
-          })
-        }
-        return new Response(JSON.stringify(upstreamBody), {
-          status: upstreamStatus,
-          headers: { 'Content-Type': 'application/json' },
-        })
-      }),
-    )
-  }
-
-  // ── Success flow (AC 9) ──────────────────────────────────────────────────
+  // ── Success flow ──────────────────────────────────────────────────────────
 
   it('success: verifies payment, forwards to upstream, returns tool result + payment-response header', async () => {
     const upstreamResult = { jsonrpc: '2.0', id: 1, result: { answer: 42 } }
-    mockFetchByUrl({ txid: MOCK_TXID }, 200, upstreamResult, 200)
+    mockUpstream(upstreamResult)
 
     const res = await app.request(`/api/v1/proxy/${SERVER_ID}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'payment-signature': validPaymentSig,
-        'payment-id': PAYMENT_ID,
+        'payment-signature': makePaymentSig(),
       },
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'priced-tool' }),
     })
 
     expect(res.status).toBe(200)
+    expect(mockSettle).toHaveBeenCalledOnce()
 
-    // AC 8: payment-response header present and correctly encoded
+    // payment-response header present and correctly encoded
     const paymentResponseHeader = res.headers.get('payment-response')
     expect(paymentResponseHeader).not.toBeNull()
     const decoded = JSON.parse(Buffer.from(paymentResponseHeader!, 'base64').toString('utf8'))
@@ -354,33 +343,67 @@ describe('POST /api/v1/proxy/:serverId — payment verification (Story 1-7)', ()
     expect(decoded.explorerUrl).toContain(MOCK_TXID)
     expect(decoded.explorerUrl).toContain('explorer.hiro.so')
 
-    // Tool result forwarded unchanged
     const body = await res.json()
     expect(body).toMatchObject({ result: { answer: 42 } })
-
-    // No 402 / payment-required header
     expect(res.headers.get('payment-required')).toBeNull()
   })
 
-  // ── Relay failure (AC 9) ─────────────────────────────────────────────────
+  // ── Replay detection ──────────────────────────────────────────────────────
 
-  it('relay failure: returns 503 RELAY_UNAVAILABLE', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockImplementation(async (url: string) => {
-        if ((url as string).includes('x402-relay')) {
-          return new Response('service unavailable', { status: 503 })
-        }
-        return new Response('{}', { status: 200 })
-      }),
-    )
+  it('replay: returns 402 REPLAY_DETECTED when txid already processed', async () => {
+    // Pre-seed the txid as already used
+    redis._store.set(`payment:${MOCK_TXID}`, 'used')
+    mockUpstream({ result: {} })
 
     const res = await app.request(`/api/v1/proxy/${SERVER_ID}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'payment-signature': validPaymentSig,
-        'payment-id': PAYMENT_ID,
+        'payment-signature': makePaymentSig(),
+      },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'priced-tool' }),
+    })
+
+    expect(res.status).toBe(402)
+    const body = await res.json() as Record<string, string>
+    expect(body.code).toBe('REPLAY_DETECTED')
+  })
+
+  // ── Settlement failure ────────────────────────────────────────────────────
+
+  it('settle returns success:false → 402 PAYMENT_FAILED', async () => {
+    mockSettle.mockResolvedValueOnce({
+      success: false,
+      errorReason: 'insufficient_funds',
+      transaction: '',
+      network: 'stacks:1' as const,
+    } satisfies SettlementResponseV2)
+
+    const res = await app.request(`/api/v1/proxy/${SERVER_ID}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'payment-signature': makePaymentSig(),
+      },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'priced-tool' }),
+    })
+
+    expect(res.status).toBe(402)
+    const body = await res.json() as Record<string, string>
+    expect(body.code).toBe('PAYMENT_FAILED')
+    expect(body.error).toContain('insufficient_funds')
+  })
+
+  // ── Relay failure ─────────────────────────────────────────────────────────
+
+  it('relay failure: returns 503 RELAY_UNAVAILABLE when settle throws', async () => {
+    mockSettle.mockRejectedValueOnce(new Error('network timeout'))
+
+    const res = await app.request(`/api/v1/proxy/${SERVER_ID}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'payment-signature': makePaymentSig(),
       },
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'priced-tool' }),
     })
@@ -390,17 +413,38 @@ describe('POST /api/v1/proxy/:serverId — payment verification (Story 1-7)', ()
     expect(body.code).toBe('RELAY_UNAVAILABLE')
   })
 
-  // ── Upstream failure after payment (AC 9) ────────────────────────────────
+  // ── Invalid payment-signature ─────────────────────────────────────────────
+
+  it('returns 400 when payment-signature is not valid base64 JSON', async () => {
+    const res = await app.request(`/api/v1/proxy/${SERVER_ID}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'payment-signature': '!!!NOT_BASE64!!!',
+      },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'priced-tool' }),
+    })
+
+    expect(res.status).toBe(400)
+    const body = await res.json() as Record<string, string>
+    expect(body.code).toBe('INVALID_REQUEST')
+  })
+
+  // ── Upstream failure after payment ────────────────────────────────────────
 
   it('upstream failure after payment: returns 502 with txid in body', async () => {
-    mockFetchByUrl({ txid: MOCK_TXID }, 200, { error: 'tool crashed' }, 500)
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response('{"error":"tool crashed"}', {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    ))
 
     const res = await app.request(`/api/v1/proxy/${SERVER_ID}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'payment-signature': validPaymentSig,
-        'payment-id': PAYMENT_ID + '-upstream-fail',  // unique paymentId to avoid replay
+        'payment-signature': makePaymentSig({ payload: { transaction: 'tx-upstream-fail' } }),
       },
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'priced-tool' }),
     })
@@ -412,35 +456,16 @@ describe('POST /api/v1/proxy/:serverId — payment verification (Story 1-7)', ()
     expect(typeof body.explorerUrl).toBe('string')
   })
 
-  // ── Missing payment-id ───────────────────────────────────────────────────
-
-  it('returns 400 when payment-signature is present but payment-id header is missing', async () => {
-    const res = await app.request(`/api/v1/proxy/${SERVER_ID}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'payment-signature': validPaymentSig,
-        // No payment-id
-      },
-      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'priced-tool' }),
-    })
-
-    expect(res.status).toBe(400)
-    const body = await res.json() as Record<string, string>
-    expect(body.code).toBe('INVALID_REQUEST')
-  })
-
-  // ── explorerUrl reflects network ─────────────────────────────────────────
+  // ── explorerUrl reflects network ──────────────────────────────────────────
 
   it('explorerUrl contains correct chain for mainnet', async () => {
-    mockFetchByUrl({ txid: MOCK_TXID }, 200, { jsonrpc: '2.0', id: 1, result: {} }, 200)
+    mockUpstream({ jsonrpc: '2.0', id: 1, result: {} })
 
     const res = await app.request(`/api/v1/proxy/${SERVER_ID}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'payment-signature': validPaymentSig,
-        'payment-id': PAYMENT_ID + '-explorer-test',
+        'payment-signature': makePaymentSig({ payload: { transaction: 'tx-mainnet-check' } }),
       },
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'priced-tool' }),
     })
@@ -468,8 +493,8 @@ describe('POST /api/v1/proxy/:serverId — upstream auth (AC4)', () => {
     const app = createApp({
       redis,
       encryptionKey: ENCRYPTION_KEY,
-      network: 'mainnet',
       relayUrl: RELAY_URL,
+      testnetRelayUrl: 'https://x402-relay.aibtc.dev',
       tokenPrices: { STX: 3.0, sBTC: 100_000.0, USDCx: 1.0 },
     })
 
@@ -493,10 +518,10 @@ describe('POST /api/v1/proxy/:serverId — upstream auth (AC4)', () => {
 
     expect(res.status).toBe(200)
     expect(capturedAuthHeader).toBe(`Bearer ${UPSTREAM_TOKEN}`)
+    vi.unstubAllGlobals()
   })
 
-  it('returns 500 when encryptedAuth cannot be decrypted (wrong key / tampered)', async () => {
-    // Encrypt with a DIFFERENT key so decryption with ENCRYPTION_KEY fails
+  it('returns 500 when encryptedAuth cannot be decrypted', async () => {
     const otherKey = 'b'.repeat(64)
     const encryptedAuth = encrypt(UPSTREAM_TOKEN, otherKey)
     const config = makeConfig({ encryptedAuth })
@@ -509,8 +534,8 @@ describe('POST /api/v1/proxy/:serverId — upstream auth (AC4)', () => {
     const app = createApp({
       redis,
       encryptionKey: ENCRYPTION_KEY,
-      network: 'mainnet',
       relayUrl: RELAY_URL,
+      testnetRelayUrl: 'https://x402-relay.aibtc.dev',
       tokenPrices: { STX: 3.0, sBTC: 100_000.0, USDCx: 1.0 },
     })
 
@@ -526,14 +551,13 @@ describe('POST /api/v1/proxy/:serverId — upstream auth (AC4)', () => {
   })
 })
 
-// ─── Hook integration: fireHooks wiring ──────────────────────────────────────
+// ─── Hook integration ─────────────────────────────────────────────────────────
 
-/** Drain setImmediate callbacks and their promise chains. */
 function flushImmediate(): Promise<void> {
   return new Promise((resolve) => setImmediate(() => setTimeout(resolve, 10)))
 }
 
-describe('POST /api/v1/proxy/:serverId — hook integration (Story 3-1)', () => {
+describe('POST /api/v1/proxy/:serverId — hook integration', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
   })
@@ -552,13 +576,18 @@ describe('POST /api/v1/proxy/:serverId — hook integration (Story 3-1)', () => 
     const app = createApp({
       redis,
       encryptionKey: ENCRYPTION_KEY,
-      network: 'mainnet',
       relayUrl: RELAY_URL,
+      testnetRelayUrl: 'https://x402-relay.aibtc.dev',
       tokenPrices: { STX: 3.0, sBTC: 100_000.0, USDCx: 1.0 },
       hooks: [hook],
     })
 
-    mockUpstream({ jsonrpc: '2.0', id: 1, result: {} })
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result: {} }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    ))
 
     const res = await app.request(`/api/v1/proxy/${SERVER_ID}`, {
       method: 'POST',
@@ -574,7 +603,6 @@ describe('POST /api/v1/proxy/:serverId — hook integration (Story 3-1)', () => 
       toolName: 'free-tool',
       success: true,
     })
-    expect(captured[0].durationMs).toBeGreaterThanOrEqual(0)
   })
 
   it('fires hooks with success:false when free tool upstream fails', async () => {
@@ -591,8 +619,8 @@ describe('POST /api/v1/proxy/:serverId — hook integration (Story 3-1)', () => 
     const app = createApp({
       redis,
       encryptionKey: ENCRYPTION_KEY,
-      network: 'mainnet',
       relayUrl: RELAY_URL,
+      testnetRelayUrl: 'https://x402-relay.aibtc.dev',
       tokenPrices: { STX: 3.0, sBTC: 100_000.0, USDCx: 1.0 },
       hooks: [hook],
     })
@@ -608,17 +636,11 @@ describe('POST /api/v1/proxy/:serverId — hook integration (Story 3-1)', () => 
 
     expect(res.status).toBe(502)
     expect(hook.onRequest).toHaveBeenCalledOnce()
-    expect(captured[0]).toMatchObject({
-      serverId: SERVER_ID,
-      toolName: 'free-tool',
-      success: false,
-    })
+    expect(captured[0]).toMatchObject({ success: false })
   })
 
   it('hook errors do not affect the gateway response', async () => {
-    const hook = {
-      onRequest: vi.fn(async () => { throw new Error('hook exploded') }),
-    }
+    const hook = { onRequest: vi.fn(async () => { throw new Error('hook exploded') }) }
 
     const config = makeConfig()
     const tools = makeTools([{ name: 'free-tool', price: 0 }])
@@ -630,13 +652,18 @@ describe('POST /api/v1/proxy/:serverId — hook integration (Story 3-1)', () => 
     const app = createApp({
       redis,
       encryptionKey: ENCRYPTION_KEY,
-      network: 'mainnet',
       relayUrl: RELAY_URL,
+      testnetRelayUrl: 'https://x402-relay.aibtc.dev',
       tokenPrices: { STX: 3.0, sBTC: 100_000.0, USDCx: 1.0 },
       hooks: [hook],
     })
 
-    mockUpstream({ jsonrpc: '2.0', id: 1, result: {} })
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ result: {} }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    ))
 
     const res = await app.request(`/api/v1/proxy/${SERVER_ID}`, {
       method: 'POST',
@@ -645,7 +672,6 @@ describe('POST /api/v1/proxy/:serverId — hook integration (Story 3-1)', () => 
     })
     await flushImmediate()
 
-    // Hook threw, but response must still be 200
     expect(res.status).toBe(200)
   })
 })

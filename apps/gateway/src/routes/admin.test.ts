@@ -46,8 +46,8 @@ describe('Admin Routes', () => {
       app = createApp({
         redis: makeRedis(),
         encryptionKey: ENCRYPTION_KEY,
-        network: 'mainnet',
         relayUrl: 'https://relay.example.com',
+        testnetRelayUrl: 'https://x402-relay.aibtc.dev',
         tokenPrices: { STX: 3.0, sBTC: 100_000.0, USDCx: 1.0 },
         operatorKey: OPERATOR_KEY,
       })
@@ -74,8 +74,8 @@ describe('Admin Routes', () => {
       const appNoKey = createApp({
         redis: makeRedis(),
         encryptionKey: ENCRYPTION_KEY,
-        network: 'mainnet',
         relayUrl: 'https://relay.example.com',
+        testnetRelayUrl: 'https://x402-relay.aibtc.dev',
         tokenPrices: { STX: 3.0, sBTC: 100_000.0, USDCx: 1.0 },
         // no operatorKey
       })
@@ -102,8 +102,8 @@ describe('Admin Routes', () => {
       const app = createApp({
         redis,
         encryptionKey: ENCRYPTION_KEY,
-        network: 'mainnet',
         relayUrl: 'https://relay.example.com',
+        testnetRelayUrl: 'https://x402-relay.aibtc.dev',
         tokenPrices: { STX: 3.0, sBTC: 100_000.0, USDCx: 1.0 },
         operatorKey: OPERATOR_KEY,
       })
@@ -132,8 +132,8 @@ describe('Admin Routes', () => {
       const app = createApp({
         redis,
         encryptionKey: ENCRYPTION_KEY,
-        network: 'mainnet',
         relayUrl: 'https://relay.example.com',
+        testnetRelayUrl: 'https://x402-relay.aibtc.dev',
         tokenPrices: { STX: 3.0, sBTC: 100_000.0, USDCx: 1.0 },
         operatorKey: OPERATOR_KEY,
       })
@@ -155,8 +155,8 @@ describe('Admin Routes', () => {
       const app = createApp({
         redis: makeRedis(),
         encryptionKey: ENCRYPTION_KEY,
-        network: 'mainnet',
         relayUrl: 'https://relay.example.com',
+        testnetRelayUrl: 'https://x402-relay.aibtc.dev',
         tokenPrices: { STX: 3.0, sBTC: 100_000.0, USDCx: 1.0 },
         operatorKey: OPERATOR_KEY,
       })
@@ -180,8 +180,8 @@ describe('Admin Routes', () => {
       const app = createApp({
         redis,
         encryptionKey: ENCRYPTION_KEY,
-        network: 'mainnet',
         relayUrl: 'https://relay.example.com',
+        testnetRelayUrl: 'https://x402-relay.aibtc.dev',
         tokenPrices: { STX: 3.0, sBTC: 100_000.0, USDCx: 1.0 },
         operatorKey: OPERATOR_KEY,
       })
@@ -211,8 +211,8 @@ describe('Admin Routes', () => {
       const app = createApp({
         redis,
         encryptionKey: ENCRYPTION_KEY,
-        network: 'mainnet',
         relayUrl: 'https://relay.example.com',
+        testnetRelayUrl: 'https://x402-relay.aibtc.dev',
         tokenPrices: { STX: 3.0, sBTC: 100_000.0, USDCx: 1.0 },
         operatorKey: OPERATOR_KEY,
       })
@@ -236,8 +236,8 @@ describe('Admin Routes', () => {
           [`server:${SERVER_ID}:config`]: JSON.stringify({ name: 'Test' }),
         }),
         encryptionKey: ENCRYPTION_KEY,
-        network: 'mainnet',
         relayUrl: 'https://relay.example.com',
+        testnetRelayUrl: 'https://x402-relay.aibtc.dev',
         tokenPrices: { STX: 3.0, sBTC: 100_000.0, USDCx: 1.0 },
         operatorKey: OPERATOR_KEY,
       })
@@ -257,8 +257,8 @@ describe('Admin Routes', () => {
       const app = createApp({
         redis: makeRedis(),
         encryptionKey: ENCRYPTION_KEY,
-        network: 'mainnet',
         relayUrl: 'https://relay.example.com',
+        testnetRelayUrl: 'https://x402-relay.aibtc.dev',
         tokenPrices: { STX: 3.0, sBTC: 100_000.0, USDCx: 1.0 },
         operatorKey: OPERATOR_KEY,
       })
@@ -278,8 +278,8 @@ describe('Admin Routes', () => {
       const app = createApp({
         redis: makeRedis(),
         encryptionKey: ENCRYPTION_KEY,
-        network: 'mainnet',
         relayUrl: 'https://relay.example.com',
+        testnetRelayUrl: 'https://x402-relay.aibtc.dev',
         tokenPrices: { STX: 3.0, sBTC: 100_000.0, USDCx: 1.0 },
         operatorKey: OPERATOR_KEY,
       })
@@ -314,8 +314,8 @@ describe('Admin Routes', () => {
       const app = createApp({
         redis,
         encryptionKey: ENCRYPTION_KEY,
-        network: 'mainnet',
         relayUrl: 'https://relay.example.com',
+        testnetRelayUrl: 'https://x402-relay.aibtc.dev',
         tokenPrices: { STX: 3.0, sBTC: 100_000.0, USDCx: 1.0 },
         operatorKey: OPERATOR_KEY,
       })
@@ -345,8 +345,8 @@ describe('Admin Routes', () => {
       const app = createApp({
         redis,
         encryptionKey: ENCRYPTION_KEY,
-        network: 'mainnet',
         relayUrl: 'https://relay.example.com',
+        testnetRelayUrl: 'https://x402-relay.aibtc.dev',
         tokenPrices: { STX: 3.0, sBTC: 100_000.0, USDCx: 1.0 },
         operatorKey: OPERATOR_KEY,
       })

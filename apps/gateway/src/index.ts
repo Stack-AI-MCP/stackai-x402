@@ -16,8 +16,8 @@ const redis = getRedis()
 export const app = createApp({
   redis: redis as any, // eslint-disable-line @typescript-eslint/no-explicit-any
   encryptionKey: config.GATEWAY_ENCRYPTION_KEY,
-  network: config.NETWORK,
   relayUrl: config.RELAY_URL,
+  testnetRelayUrl: config.TESTNET_RELAY_URL,
   tokenPrices: {
     STX: config.TOKEN_PRICE_STX,
     sBTC: config.TOKEN_PRICE_SBTC,

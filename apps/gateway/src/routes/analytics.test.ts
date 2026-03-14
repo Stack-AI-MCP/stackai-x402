@@ -51,8 +51,8 @@ describe('GET /api/v1/servers/:serverId/analytics', () => {
     app = createApp({
       redis,
       encryptionKey: ENCRYPTION_KEY,
-      network: 'mainnet',
       relayUrl: 'https://relay.example.com',
+      testnetRelayUrl: 'https://x402-relay.aibtc.dev',
       tokenPrices: { STX: 3.0, sBTC: 100_000.0, USDCx: 1.0 },
     })
   })
@@ -142,8 +142,8 @@ describe('GET /api/v1/servers/:serverId/analytics', () => {
     const emptyApp = createApp({
       redis: emptyRedis,
       encryptionKey: ENCRYPTION_KEY,
-      network: 'mainnet',
       relayUrl: 'https://relay.example.com',
+      testnetRelayUrl: 'https://x402-relay.aibtc.dev',
       tokenPrices: { STX: 3.0, sBTC: 100_000.0, USDCx: 1.0 },
     })
 

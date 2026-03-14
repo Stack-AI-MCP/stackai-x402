@@ -1,5 +1,5 @@
-import type { TokenType } from './token-registry.js'
-import { TOKEN_REGISTRY } from './token-registry.js'
+import { getTokenDecimals } from 'x402-stacks'
+import type { TokenType } from 'x402-stacks'
 
 // Scale factor for converting float inputs to integers before bigint arithmetic.
 // 6 decimal places handles USD amounts and prices down to $0.000001.
@@ -28,7 +28,7 @@ export function usdToMicro(
     throw new Error(`priceUSD must be a positive finite number, got ${priceUSD}`)
   }
 
-  const { decimals } = TOKEN_REGISTRY[tokenType]
+  const decimals = getTokenDecimals(tokenType)
 
   // Convert float inputs to scaled integers before any division
   const usdScaled = BigInt(Math.round(usdAmount * INPUT_SCALE_NUM))

@@ -15,8 +15,9 @@ const app = createApp({
     pfcount: async () => 0,
   },
   encryptionKey: 'a'.repeat(64),
-  network: 'mainnet',
   tokenPrices: { STX: 3.0, sBTC: 100_000.0, USDCx: 1.0 },
+  relayUrl: 'https://x402-relay.aibtc.com',
+  testnetRelayUrl: 'https://x402-relay.aibtc.dev',
 })
 
 describe('gateway health route', () => {

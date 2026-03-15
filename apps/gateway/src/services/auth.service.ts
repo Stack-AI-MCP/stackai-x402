@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import {
-  verifyMessageSignatureRsv,
+  verifySignature,
   publicKeyToAddress,
   AddressVersion,
 } from '@stacks/transactions'
@@ -67,11 +67,10 @@ export function verifyMessageSignature(
   const messageHash = createHash('sha256').update(message).digest('hex')
 
   try {
-    return verifyMessageSignatureRsv({
-      message: messageHash,
-      signature,
-      publicKey,
-    })
+    // signMessageHashRsv returns RSV format: r (64 hex) + s (64 hex) + v (2 hex)
+    // verifySignature expects just r + s (first 128 hex chars)
+    const rs = signature.length === 130 ? signature.slice(0, 128) : signature
+    return verifySignature(rs, messageHash, publicKey)
   } catch {
     return false
   }

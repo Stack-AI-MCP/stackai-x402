@@ -21,10 +21,10 @@ import type {
  * Returns the signature + derived compressed public key for gateway verification.
  */
 function signMessage(message: string, privateKey: string) {
-  const hash = createHash('sha256').update(message).digest()
+  const hash = createHash('sha256').update(message).digest('hex')
   const signature = signMessageHashRsv({ messageHash: hash, privateKey })
   const publicKey = privateKeyToPublic(privateKey)
-  return { signature: signature.data, publicKey }
+  return { signature, publicKey }
 }
 
 /** Derives a Stacks address from a private key. */

@@ -25,6 +25,8 @@ const CreateAgentSchema = z.object({
   ownerAddress: z.string().regex(STACKS_ADDRESS_RE, 'ownerAddress must be a valid Stacks address'),
   tools: z.array(AgentToolSchema).min(1, 'at least one tool is required'),
   moltbookName: z.string().optional(),
+  moltbookApiKey: z.string().startsWith('moltbook_').optional(),
+  heartbeatIntervalHours: z.number().min(1).max(24).optional(),
   systemPrompt: z.string().optional(),
   starterPrompts: z.array(z.string()).optional(),
   network: z.enum(['mainnet', 'testnet']).default('mainnet'),
@@ -111,6 +113,19 @@ agentsRouter.post('/', async (c) => {
 
   try {
     const agent = await createAgent(agentInput, { redis })
+
+    // Bridge to moltbook service via Redis queue (API key passes through, not stored in gateway)
+    if (parsed.data.moltbookApiKey && agentInput.moltbookName) {
+      await redis.lpush('moltbook:agent-registrations', JSON.stringify({
+        gatewayAgentId: agent.agentId,
+        moltbookApiKey: parsed.data.moltbookApiKey,
+        moltbookName: agentInput.moltbookName,
+        description: agentInput.description,
+        tools: agentInput.tools,
+        heartbeatIntervalHours: parsed.data.heartbeatIntervalHours ?? 6,
+      }))
+    }
+
     return c.json(agent, 201)
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Agent creation failed'
@@ -157,7 +172,11 @@ agentsRouter.get('/:agentId', async (c) => {
     serverName: serverMap.get(t.serverId)?.name ?? 'Unknown',
   }))
 
-  return c.json({ ...agent, tools: resolvedTools })
+  // Enrich with moltbook status if available
+  const moltbookStatusJson = await redis.get(`moltbook:status:${agentId}`)
+  const moltbook = moltbookStatusJson ? JSON.parse(moltbookStatusJson) : undefined
+
+  return c.json({ ...agent, tools: resolvedTools, ...(moltbook && { moltbook }) })
 })
 
 // ─── Update agent: PUT /agents/:agentId ──────────────────────────────────────

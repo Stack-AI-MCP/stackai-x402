@@ -137,6 +137,7 @@ export default function RegisterPage() {
       name: payload.name,
       ...(payload.description && { description: payload.description }),
       recipientAddress: payload.recipientAddress,
+      ownerAddress: address ?? payload.recipientAddress, // Wallet address as server owner
       network: payload.network,
       acceptedTokens: payload.acceptedTokens,
       ...(Object.keys(payload.toolPricing).length > 0 && { toolPricing: payload.toolPricing }),

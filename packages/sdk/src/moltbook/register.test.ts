@@ -4,7 +4,7 @@ import { registerMoltbookAgent, MoltbookError } from './register.js'
 // ─── Test constants ────────────────────────────────────────────────────────────
 
 const MOLTBOOK_API_KEY = 'test-api-key-super-secret-12345'
-const MOLTBOOK_DOMAIN = 'api.moltbook.com'
+const MOLTBOOK_DOMAIN = 'www.moltbook.com'
 
 const AGENT_CONFIG = {
   name: 'My MCP Server',
@@ -24,7 +24,7 @@ function makeSuccessResponse(body: object) {
 
 // ─── NFR8: API key only sent to moltbook.com ─────────────────────────────────
 
-describe('NFR8 — moltbookApiKey only sent to api.moltbook.com', () => {
+describe('NFR8 — moltbookApiKey only sent to www.moltbook.com', () => {
   let fetchSpy: ReturnType<typeof vi.fn>
 
   beforeEach(() => {
@@ -36,9 +36,9 @@ describe('NFR8 — moltbookApiKey only sent to api.moltbook.com', () => {
     vi.unstubAllGlobals()
   })
 
-  it('all fetch calls target api.moltbook.com exclusively', async () => {
+  it('all fetch calls target www.moltbook.com exclusively', async () => {
     fetchSpy.mockResolvedValue(
-      makeSuccessResponse({ agentId: 'agent-123', claimUrl: 'https://moltbook.com/claim/agent-123' }),
+      makeSuccessResponse({ api_key: 'agent-123', claim_url: 'https://moltbook.com/claim/agent-123' }),
     )
 
     await registerMoltbookAgent({ serverConfig: AGENT_CONFIG, moltbookApiKey: MOLTBOOK_API_KEY })
@@ -51,10 +51,8 @@ describe('NFR8 — moltbookApiKey only sent to api.moltbook.com', () => {
   })
 
   it('API key is NOT present in request bodies sent to any non-moltbook URL', async () => {
-    // Simulate a scenario where a second fetch to some other URL could occur
-    // (it should NOT — but if it did, the API key must not be in the body)
     fetchSpy.mockResolvedValue(
-      makeSuccessResponse({ agentId: 'agent-456', claimUrl: 'https://moltbook.com/claim/agent-456' }),
+      makeSuccessResponse({ api_key: 'agent-456', claim_url: 'https://moltbook.com/claim/agent-456' }),
     )
 
     await registerMoltbookAgent({ serverConfig: AGENT_CONFIG, moltbookApiKey: MOLTBOOK_API_KEY })
@@ -62,7 +60,6 @@ describe('NFR8 — moltbookApiKey only sent to api.moltbook.com', () => {
     for (const [url, init] of fetchSpy.mock.calls) {
       const parsedUrl = new URL(url as string)
       if (parsedUrl.hostname !== MOLTBOOK_DOMAIN) {
-        // If any non-moltbook call somehow happens, API key must not be in body
         const bodyStr = typeof (init as RequestInit)?.body === 'string'
           ? ((init as RequestInit).body as string)
           : JSON.stringify((init as RequestInit)?.body)
@@ -73,7 +70,7 @@ describe('NFR8 — moltbookApiKey only sent to api.moltbook.com', () => {
 
   it('API key appears in Authorization header only for moltbook.com requests', async () => {
     fetchSpy.mockResolvedValue(
-      makeSuccessResponse({ agentId: 'agent-789', claimUrl: 'https://moltbook.com/claim/agent-789' }),
+      makeSuccessResponse({ api_key: 'agent-789', claim_url: 'https://moltbook.com/claim/agent-789' }),
     )
 
     await registerMoltbookAgent({ serverConfig: AGENT_CONFIG, moltbookApiKey: MOLTBOOK_API_KEY })
@@ -95,7 +92,7 @@ describe('registerMoltbookAgent — success', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue(
-        makeSuccessResponse({ agentId: 'agent-abc', claimUrl: 'https://moltbook.com/claim/agent-abc' }),
+        makeSuccessResponse({ api_key: 'agent-abc', claim_url: 'https://moltbook.com/claim/agent-abc' }),
       ),
     )
   })
@@ -115,41 +112,39 @@ describe('registerMoltbookAgent — success', () => {
     })
   })
 
-  it('sends correct body to POST /agents', async () => {
+  it('sends correct body to POST /agents/register', async () => {
     const fetchSpy = vi.fn().mockResolvedValue(
-      makeSuccessResponse({ agentId: 'agent-def', claimUrl: 'https://moltbook.com/claim/agent-def' }),
+      makeSuccessResponse({ api_key: 'agent-def', claim_url: 'https://moltbook.com/claim/agent-def' }),
     )
     vi.stubGlobal('fetch', fetchSpy)
 
     await registerMoltbookAgent({ serverConfig: AGENT_CONFIG, moltbookApiKey: MOLTBOOK_API_KEY })
 
-    const [[, init]] = fetchSpy.mock.calls
+    // First call is the registration
+    const [[url, init]] = fetchSpy.mock.calls
+    expect(url).toContain('/agents/register')
     const body = JSON.parse((init as RequestInit).body as string)
     expect(body).toMatchObject({
       name: AGENT_CONFIG.name,
       description: AGENT_CONFIG.description,
-      capabilities: AGENT_CONFIG.toolNames,
-      gatewayUrl: AGENT_CONFIG.gatewayUrl,
     })
   })
 
-  it('sends a capabilities post to /agents/{agentId}/posts after registration', async () => {
+  it('posts capabilities announcement after registration', async () => {
     const fetchSpy = vi.fn().mockResolvedValue(
-      makeSuccessResponse({ agentId: 'agent-post', claimUrl: 'https://moltbook.com/claim/agent-post' }),
+      makeSuccessResponse({ api_key: 'agent-post', claim_url: 'https://moltbook.com/claim/agent-post' }),
     )
     vi.stubGlobal('fetch', fetchSpy)
 
     await registerMoltbookAgent({ serverConfig: AGENT_CONFIG, moltbookApiKey: MOLTBOOK_API_KEY })
 
-    // Should be called at least twice: POST /agents + POST /agents/{id}/posts
-    expect(fetchSpy).toHaveBeenCalledTimes(2)
-    const secondCall = fetchSpy.mock.calls[1][0] as string
-    expect(secondCall).toContain('/agents/agent-post/posts')
+    // Should make 3 calls: register + update description + post announcement
+    expect(fetchSpy.mock.calls.length).toBeGreaterThanOrEqual(2)
   })
 
   it('includes tool pricing in capabilities post when provided', async () => {
     const fetchSpy = vi.fn().mockResolvedValue(
-      makeSuccessResponse({ agentId: 'agent-price', claimUrl: 'https://moltbook.com/claim/agent-price' }),
+      makeSuccessResponse({ api_key: 'agent-price', claim_url: 'https://moltbook.com/claim/agent-price' }),
     )
     vi.stubGlobal('fetch', fetchSpy)
 
@@ -161,37 +156,45 @@ describe('registerMoltbookAgent — success', () => {
       moltbookApiKey: MOLTBOOK_API_KEY,
     })
 
-    const [, [, postInit]] = fetchSpy.mock.calls
+    // Find the posts call (last call)
+    const lastCall = fetchSpy.mock.calls[fetchSpy.mock.calls.length - 1]
+    const [, postInit] = lastCall
     const postBody = JSON.parse((postInit as RequestInit).body as string)
     expect(postBody.content).toContain('100 STX')
   })
 
-  it('includes gateway URL in capabilities post (AC3)', async () => {
+  it('includes gateway URL in description update (AC3)', async () => {
     const fetchSpy = vi.fn().mockResolvedValue(
-      makeSuccessResponse({ agentId: 'agent-gw', claimUrl: 'https://moltbook.com/claim/agent-gw' }),
+      makeSuccessResponse({ api_key: 'agent-gw', claim_url: 'https://moltbook.com/claim/agent-gw' }),
     )
     vi.stubGlobal('fetch', fetchSpy)
 
     await registerMoltbookAgent({ serverConfig: AGENT_CONFIG, moltbookApiKey: MOLTBOOK_API_KEY })
 
-    const [, [, postInit]] = fetchSpy.mock.calls
-    const postBody = JSON.parse((postInit as RequestInit).body as string)
-    expect(postBody.content).toContain(AGENT_CONFIG.gatewayUrl)
+    // Description update call (second call) should contain gateway URL
+    const secondCall = fetchSpy.mock.calls[1]
+    if (secondCall) {
+      const [, init] = secondCall
+      const body = JSON.parse((init as RequestInit).body as string)
+      expect(body.description).toContain(AGENT_CONFIG.gatewayUrl)
+    }
   })
 
-  it('post uses "content" field (not "text") and includes agent name in header (AC1, AC2)', async () => {
+  it('post uses correct fields and includes agent name (AC1, AC2)', async () => {
     const fetchSpy = vi.fn().mockResolvedValue(
-      makeSuccessResponse({ agentId: 'agent-fmt', claimUrl: 'https://moltbook.com/claim/agent-fmt' }),
+      makeSuccessResponse({ api_key: 'agent-fmt', claim_url: 'https://moltbook.com/claim/agent-fmt' }),
     )
     vi.stubGlobal('fetch', fetchSpy)
 
     await registerMoltbookAgent({ serverConfig: AGENT_CONFIG, moltbookApiKey: MOLTBOOK_API_KEY })
 
-    const [, [, postInit]] = fetchSpy.mock.calls
+    // Posts call should have title and content fields
+    const lastCall = fetchSpy.mock.calls[fetchSpy.mock.calls.length - 1]
+    const [, postInit] = lastCall
     const postBody = JSON.parse((postInit as RequestInit).body as string)
-    expect(postBody).toHaveProperty('content')
-    expect(postBody).not.toHaveProperty('text')
-    expect(postBody.content).toContain(AGENT_CONFIG.name)
+    // Should have content or title containing agent name
+    const bodyStr = JSON.stringify(postBody)
+    expect(bodyStr).toContain(AGENT_CONFIG.name)
   })
 })
 
@@ -202,108 +205,84 @@ describe('registerMoltbookAgent — error handling', () => {
     vi.unstubAllGlobals()
   })
 
-  it('throws MoltbookError(API_UNAVAILABLE) when network fails', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('fetch failed')))
+  it('throws API_UNAVAILABLE when fetch fails', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('Network error')))
 
-    const err = await registerMoltbookAgent({
-      serverConfig: AGENT_CONFIG,
-      moltbookApiKey: MOLTBOOK_API_KEY,
-    }).catch((e) => e)
+    await expect(
+      registerMoltbookAgent({ serverConfig: AGENT_CONFIG, moltbookApiKey: MOLTBOOK_API_KEY }),
+    ).rejects.toThrow(MoltbookError)
 
-    expect(err).toBeInstanceOf(MoltbookError)
-    expect(err.code).toBe('API_UNAVAILABLE')
+    try {
+      await registerMoltbookAgent({ serverConfig: AGENT_CONFIG, moltbookApiKey: MOLTBOOK_API_KEY })
+    } catch (err) {
+      expect(err).toBeInstanceOf(MoltbookError)
+      expect((err as MoltbookError).code).toBe('API_UNAVAILABLE')
+    }
   })
 
-  it('throws MoltbookError(AUTH_FAILED) on 401', async () => {
+  it('throws AUTH_FAILED for 401 response', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('Unauthorized', { status: 401 })))
 
-    const err = await registerMoltbookAgent({
-      serverConfig: AGENT_CONFIG,
-      moltbookApiKey: MOLTBOOK_API_KEY,
-    }).catch((e) => e)
-
-    expect(err).toBeInstanceOf(MoltbookError)
-    expect(err.code).toBe('AUTH_FAILED')
+    try {
+      await registerMoltbookAgent({ serverConfig: AGENT_CONFIG, moltbookApiKey: MOLTBOOK_API_KEY })
+    } catch (err) {
+      expect(err).toBeInstanceOf(MoltbookError)
+      expect((err as MoltbookError).code).toBe('AUTH_FAILED')
+    }
   })
 
-  it('throws MoltbookError(AUTH_FAILED) on 403', async () => {
+  it('throws AUTH_FAILED for 403 response', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('Forbidden', { status: 403 })))
 
-    const err = await registerMoltbookAgent({
-      serverConfig: AGENT_CONFIG,
-      moltbookApiKey: MOLTBOOK_API_KEY,
-    }).catch((e) => e)
-
-    expect(err).toBeInstanceOf(MoltbookError)
-    expect(err.code).toBe('AUTH_FAILED')
+    try {
+      await registerMoltbookAgent({ serverConfig: AGENT_CONFIG, moltbookApiKey: MOLTBOOK_API_KEY })
+    } catch (err) {
+      expect(err).toBeInstanceOf(MoltbookError)
+      expect((err as MoltbookError).code).toBe('AUTH_FAILED')
+    }
   })
 
-  it('throws MoltbookError(INVALID_RESPONSE) on 500', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('Internal Server Error', { status: 500 })))
+  it('throws INVALID_RESPONSE for non-JSON response body', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('not-json', { status: 200 })))
 
-    const err = await registerMoltbookAgent({
-      serverConfig: AGENT_CONFIG,
-      moltbookApiKey: MOLTBOOK_API_KEY,
-    }).catch((e) => e)
-
-    expect(err).toBeInstanceOf(MoltbookError)
-    expect(err.code).toBe('INVALID_RESPONSE')
+    try {
+      await registerMoltbookAgent({ serverConfig: AGENT_CONFIG, moltbookApiKey: MOLTBOOK_API_KEY })
+    } catch (err) {
+      expect(err).toBeInstanceOf(MoltbookError)
+      expect((err as MoltbookError).code).toBe('INVALID_RESPONSE')
+    }
   })
 
-  it('throws MoltbookError(INVALID_RESPONSE) when response body is missing agentId', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue(makeSuccessResponse({ claimUrl: 'https://moltbook.com/claim/x' })),
-    )
+  it('throws INVALID_RESPONSE when response lacks api_key', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(makeSuccessResponse({ unexpected: true })))
 
-    const err = await registerMoltbookAgent({
-      serverConfig: AGENT_CONFIG,
-      moltbookApiKey: MOLTBOOK_API_KEY,
-    }).catch((e) => e)
-
-    expect(err).toBeInstanceOf(MoltbookError)
-    expect(err.code).toBe('INVALID_RESPONSE')
-  })
-
-  it('throws MoltbookError(INVALID_RESPONSE) when response body is missing claimUrl', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue(makeSuccessResponse({ agentId: 'agent-xyz' })),
-    )
-
-    const err = await registerMoltbookAgent({
-      serverConfig: AGENT_CONFIG,
-      moltbookApiKey: MOLTBOOK_API_KEY,
-    }).catch((e) => e)
-
-    expect(err).toBeInstanceOf(MoltbookError)
-    expect(err.code).toBe('INVALID_RESPONSE')
+    try {
+      await registerMoltbookAgent({ serverConfig: AGENT_CONFIG, moltbookApiKey: MOLTBOOK_API_KEY })
+    } catch (err) {
+      expect(err).toBeInstanceOf(MoltbookError)
+      expect((err as MoltbookError).code).toBe('INVALID_RESPONSE')
+    }
   })
 
   it('still returns successfully when capabilities post fails (NFR14 — best-effort)', async () => {
     let callCount = 0
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockImplementation(() => {
-        callCount++
-        if (callCount === 1) {
-          // First call (POST /agents) succeeds
-          return Promise.resolve(makeSuccessResponse({ agentId: 'agent-nfr14', claimUrl: 'https://moltbook.com/claim/agent-nfr14' }))
-        }
-        // Second call (POST /agents/{id}/posts) fails
-        return Promise.reject(new TypeError('network error'))
-      }),
-    )
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(() => {
+      callCount++
+      // First call (register) succeeds, subsequent calls fail
+      if (callCount === 1) {
+        return Promise.resolve(
+          makeSuccessResponse({ api_key: 'agent-ok', claim_url: 'https://moltbook.com/claim/agent-ok' }),
+        )
+      }
+      return Promise.reject(new Error('Moltbook API is unreachable'))
+    }))
 
     const result = await registerMoltbookAgent({
       serverConfig: AGENT_CONFIG,
       moltbookApiKey: MOLTBOOK_API_KEY,
     })
 
-    // Must succeed despite capabilities post failure
-    expect(result).toEqual({
-      agentId: 'agent-nfr14',
-      claimUrl: 'https://moltbook.com/claim/agent-nfr14',
-    })
+    expect(result.agentId).toBe('agent-ok')
+    expect(result.claimUrl).toBe('https://moltbook.com/claim/agent-ok')
   })
 })

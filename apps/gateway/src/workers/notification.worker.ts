@@ -64,29 +64,16 @@ async function handleErrorRateAlert(
   const config = JSON.parse(configJson) as {
     telegramChatId?: string
     moltbookAgentId?: string
-    moltbookApiKey?: string
   }
 
-  // ── Moltbook comment (AC2 — post alert on agent's feed) ──────────
-  if (config.moltbookAgentId && config.moltbookApiKey) {
-    const pct = (data.errorRate * 100).toFixed(1)
-    const res = await fetch(
-      `https://api.moltbook.com/agents/${config.moltbookAgentId}/comments`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${config.moltbookApiKey}`,
-        },
-        body: JSON.stringify({
-          text: `Error rate alert: ${pct}% errors in the last hour. Please investigate.`,
-        }),
-        signal: AbortSignal.timeout(10_000),
-      },
-    )
-    if (!res.ok) {
-      throw new Error(`Moltbook returned ${res.status}`)
-    }
+  // ── Moltbook error alert (delegated to standalone moltbook service via pub/sub) ──
+  if (config.moltbookAgentId) {
+    await pubRedis.publish('moltbook:error-alerts', JSON.stringify({
+      serverId: data.serverId,
+      agentId: config.moltbookAgentId,
+      errorRate: data.errorRate,
+      timestamp: Date.now(),
+    }))
   }
 
   // ── Telegram alert ────────────────────────────────────────────────

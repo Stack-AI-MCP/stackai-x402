@@ -191,30 +191,28 @@ describe('notification.worker', () => {
     const MOLTBOOK_CONFIG = {
       telegramChatId: '12345',
       moltbookAgentId: 'agent-abc',
-      moltbookApiKey: 'moltbook-secret-key',
     }
 
-    it('posts comment to Moltbook when agentId is configured (AC2)', async () => {
+    it('publishes to moltbook:error-alerts channel when agentId is configured (AC2)', async () => {
       redis = makeRedis(JSON.stringify(MOLTBOOK_CONFIG))
-      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('OK', { status: 200 })))
       createNotificationWorker({ redis, pubRedis, telegramBotToken: 'bot-token' })
 
       await capturedProcessor!({ name: 'notify:error-rate-alert', data: ALERT_DATA })
 
-      expect(fetch).toHaveBeenCalledWith(
-        'https://api.moltbook.com/agents/agent-abc/comments',
-        expect.objectContaining({
-          method: 'POST',
-          headers: expect.objectContaining({
-            Authorization: 'Bearer moltbook-secret-key',
-          }),
-        }),
+      expect(pubRedis.publish).toHaveBeenCalledWith(
+        'moltbook:error-alerts',
+        expect.stringContaining('"agentId":"agent-abc"'),
       )
+      const published = JSON.parse(
+        pubRedis.publish.mock.calls.find((c: any) => c[0] === 'moltbook:error-alerts')![1],
+      )
+      expect(published.serverId).toBe('server-xyz')
+      expect(published.errorRate).toBe(0.15)
+      expect(published.timestamp).toBeTypeOf('number')
     })
 
     it('sends Telegram alert when chatId is configured', async () => {
       redis = makeRedis(JSON.stringify(MOLTBOOK_CONFIG))
-      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('OK', { status: 200 })))
       createNotificationWorker({ redis, pubRedis, telegramBotToken: 'bot-token' })
 
       await capturedProcessor!({ name: 'notify:error-rate-alert', data: ALERT_DATA })
@@ -239,14 +237,17 @@ describe('notification.worker', () => {
       )
     })
 
-    it('skips Moltbook silently when agentId is not configured', async () => {
+    it('skips Moltbook pub/sub when agentId is not configured', async () => {
       redis = makeRedis(JSON.stringify({ telegramChatId: '12345' }))
       createNotificationWorker({ redis, pubRedis, telegramBotToken: 'bot-token' })
 
       await capturedProcessor!({ name: 'notify:error-rate-alert', data: ALERT_DATA })
 
-      // fetch not called (no Moltbook config)
-      expect(fetch).not.toHaveBeenCalled()
+      // Only notifications channel published, not moltbook:error-alerts
+      const moltbookCalls = pubRedis.publish.mock.calls.filter(
+        (c: any) => c[0] === 'moltbook:error-alerts',
+      )
+      expect(moltbookCalls).toHaveLength(0)
     })
 
     it('skips silently when server config not found', async () => {
@@ -260,14 +261,21 @@ describe('notification.worker', () => {
       expect(pubRedis.publish).not.toHaveBeenCalled()
     })
 
-    it('throws on Moltbook failure to trigger BullMQ retry (AC6, NFR14)', async () => {
+    it('publishes error-rate-alert to both moltbook and notifications channels', async () => {
       redis = makeRedis(JSON.stringify(MOLTBOOK_CONFIG))
-      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('Service Unavailable', { status: 503 })))
       createNotificationWorker({ redis, pubRedis, telegramBotToken: 'bot-token' })
 
-      await expect(
-        capturedProcessor!({ name: 'notify:error-rate-alert', data: ALERT_DATA }),
-      ).rejects.toThrow('Moltbook returned 503')
+      await capturedProcessor!({ name: 'notify:error-rate-alert', data: ALERT_DATA })
+
+      // Both channels should receive a publish
+      expect(pubRedis.publish).toHaveBeenCalledWith(
+        'moltbook:error-alerts',
+        expect.any(String),
+      )
+      expect(pubRedis.publish).toHaveBeenCalledWith(
+        'notifications:server-xyz',
+        expect.stringContaining('"type":"error-rate-alert"'),
+      )
     })
   })
 })

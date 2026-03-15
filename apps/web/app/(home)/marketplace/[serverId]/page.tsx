@@ -25,6 +25,7 @@ import { TokenBadge } from '@/components/x402/TokenBadge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ToolRunnerModal, type ToolForRunner } from '@/components/x402/ToolRunnerModal'
 import { ServerFavicon } from '@/components/x402/ServerFavicon'
+import { MoltbookBadge } from '@/components/moltbook-badge'
 import { cn, formatRelative, formatDate } from '@/lib/utils/format'
 
 const GATEWAY_URL = process.env.NEXT_PUBLIC_GATEWAY_URL ?? 'http://localhost:3001'
@@ -51,6 +52,7 @@ interface ServerDetail {
   telegramChatId?: string
   webhookUrl?: string
   moltbookAgentId?: string
+  moltbookName?: string
 }
 
 const fetcher = async (url: string) => {
@@ -152,6 +154,7 @@ export default function ServerDetailsPage() {
             ) : (
               <HighlighterText variant="green">MAINNET</HighlighterText>
             )}
+            {data.moltbookName && <MoltbookBadge moltbookName={data.moltbookName} size="md" />}
           </div>
         </div>
 

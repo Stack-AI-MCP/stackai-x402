@@ -5,7 +5,6 @@ import { createApp } from '../app.js'
 
 const ENCRYPTION_KEY = 'a'.repeat(64)
 const SERVER_ID = '11111111-1111-1111-1111-111111111111'
-const OWNER_KEY = 'test-owner-key-abc123'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -24,6 +23,8 @@ function makeRedis(initial: Record<string, string> = {}) {
     incrby: vi.fn(async () => 1),
     pfadd: vi.fn(async () => 1),
     pfcount: vi.fn(async () => 42),
+    zrevrange: vi.fn(async () => []),
+    zcard: vi.fn(async () => 0),
     _store: store,
   }
 }
@@ -41,7 +42,6 @@ describe('GET /api/v1/servers/:serverId/analytics', () => {
   beforeEach(() => {
     const today = todayStr()
     redis = makeRedis({
-      [`server:${SERVER_ID}:ownerKey`]: OWNER_KEY,
       [`analytics:${SERVER_ID}:${today}:calls`]: '150',
       [`analytics:${SERVER_ID}:${today}:revenue:STX`]: '5000000',
       [`analytics:${SERVER_ID}:${today}:revenue:sBTC`]: '12345',
@@ -57,27 +57,16 @@ describe('GET /api/v1/servers/:serverId/analytics', () => {
     })
   })
 
-  it('returns 403 without X-Owner-Key header', async () => {
+  it('returns 200 without auth (public endpoint)', async () => {
     const res = await app.request(`/api/v1/servers/${SERVER_ID}/analytics`, {
       method: 'GET',
     })
-    expect(res.status).toBe(403)
-    const body = (await res.json()) as Record<string, string>
-    expect(body.code).toBe('UNAUTHORIZED')
-  })
-
-  it('returns 403 with wrong owner key', async () => {
-    const res = await app.request(`/api/v1/servers/${SERVER_ID}/analytics`, {
-      method: 'GET',
-      headers: { 'X-Owner-Key': 'test-owner-key-WRONG1' }, // same length as OWNER_KEY, different value
-    })
-    expect(res.status).toBe(403)
+    expect(res.status).toBe(200)
   })
 
   it('returns 400 for invalid server ID format', async () => {
     const res = await app.request('/api/v1/servers/not-a-uuid/analytics', {
       method: 'GET',
-      headers: { 'X-Owner-Key': OWNER_KEY },
     })
     expect(res.status).toBe(400)
     const body = (await res.json()) as Record<string, string>
@@ -87,7 +76,6 @@ describe('GET /api/v1/servers/:serverId/analytics', () => {
   it('returns analytics with totalCalls, uniqueCallers, revenue, and daily array', async () => {
     const res = await app.request(`/api/v1/servers/${SERVER_ID}/analytics`, {
       method: 'GET',
-      headers: { 'X-Owner-Key': OWNER_KEY },
     })
     expect(res.status).toBe(200)
 
@@ -117,7 +105,6 @@ describe('GET /api/v1/servers/:serverId/analytics', () => {
   it('uses mget to batch-read call counts', async () => {
     await app.request(`/api/v1/servers/${SERVER_ID}/analytics`, {
       method: 'GET',
-      headers: { 'X-Owner-Key': OWNER_KEY },
     })
 
     // mget called at least twice: once for calls, once for revenue
@@ -127,16 +114,13 @@ describe('GET /api/v1/servers/:serverId/analytics', () => {
   it('calls pfcount for unique callers', async () => {
     await app.request(`/api/v1/servers/${SERVER_ID}/analytics`, {
       method: 'GET',
-      headers: { 'X-Owner-Key': OWNER_KEY },
     })
 
     expect(redis.pfcount).toHaveBeenCalledWith(`analytics:${SERVER_ID}:callers`)
   })
 
   it('returns zeros when no analytics data exists', async () => {
-    const emptyRedis = makeRedis({
-      [`server:${SERVER_ID}:ownerKey`]: OWNER_KEY,
-    })
+    const emptyRedis = makeRedis({})
     emptyRedis.pfcount.mockResolvedValue(0)
 
     const emptyApp = createApp({
@@ -149,7 +133,6 @@ describe('GET /api/v1/servers/:serverId/analytics', () => {
 
     const res = await emptyApp.request(`/api/v1/servers/${SERVER_ID}/analytics`, {
       method: 'GET',
-      headers: { 'X-Owner-Key': OWNER_KEY },
     })
     expect(res.status).toBe(200)
 

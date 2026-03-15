@@ -6,6 +6,8 @@ import { usdToMicro, decrypt } from 'stackai-x402/internal'
 import type { AppEnv } from '../app.js'
 import type { ServerConfig, IntrospectedTool } from '../services/registration.service.js'
 import { enqueuePaymentNotification } from '../services/notification.service.js'
+import { logTransaction } from '../services/agent.service.js'
+import type { TransactionRecord } from '../services/agent.service.js'
 import type { Hook, RequestContext } from 'stackai-x402/hooks'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -208,7 +210,7 @@ export async function handleProxy(c: Context<AppEnv>, serverId: string): Promise
       upstreamRes = await callUpstream(body, config, upstreamAuthHeader)
     } catch (err) {
       fireHooks(hooks, {
-        serverId, toolName: body.method, payer: senderAddress, txid,
+        serverId, toolName, payer: senderAddress, txid,
         amount: paidAmount, token: paidToken, success: false,
         durationMs: Date.now() - startTime, timestamp,
       })
@@ -218,7 +220,7 @@ export async function handleProxy(c: Context<AppEnv>, serverId: string): Promise
 
     if (!upstreamRes.ok) {
       fireHooks(hooks, {
-        serverId, toolName: body.method, payer: senderAddress, txid,
+        serverId, toolName, payer: senderAddress, txid,
         amount: paidAmount, token: paidToken, success: false,
         durationMs: Date.now() - startTime, timestamp,
       })
@@ -237,18 +239,21 @@ export async function handleProxy(c: Context<AppEnv>, serverId: string): Promise
 
     setImmediate(() => {
       enqueuePaymentNotification(redis, {
-        serverId,
-        tool: body.method,
-        amount: paidAmount,
-        token: paidToken,
-        fromAddress: senderAddress,
-        txid,
+        serverId, tool: toolName, amount: paidAmount,
+        token: paidToken, fromAddress: senderAddress, txid,
       }).catch(() => {})
+
+      logTransaction({
+        id: `tx_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        status: 'settled', serverId, serverName: config.name,
+        toolName, amount: paidAmount, token: paidToken,
+        network, payer: senderAddress, txHash: txid, timestamp,
+      }, { redis }).catch(() => {})
     })
 
     fireHooks(hooks, {
       serverId,
-      toolName: body.method,
+      toolName,
       payer: senderAddress,
       txid,
       amount: paidAmount,
@@ -266,7 +271,7 @@ export async function handleProxy(c: Context<AppEnv>, serverId: string): Promise
     const freeRes = await callUpstream(body, config, upstreamAuthHeader)
     fireHooks(hooks, {
       serverId,
-      toolName: body.method,
+      toolName,
       success: freeRes.ok,
       durationMs: Date.now() - startTime,
       timestamp,
@@ -275,7 +280,7 @@ export async function handleProxy(c: Context<AppEnv>, serverId: string): Promise
   } catch (err) {
     fireHooks(hooks, {
       serverId,
-      toolName: body.method,
+      toolName,
       success: false,
       durationMs: Date.now() - startTime,
       timestamp,

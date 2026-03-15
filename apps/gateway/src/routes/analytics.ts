@@ -1,8 +1,11 @@
 import { Hono } from 'hono'
 
 import type { AppEnv } from '../app.js'
+import type { RedisLike } from '../services/registration.service.js'
+import { scanAllKeys } from '../services/registration.service.js'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+const ULID_RE = /^[0-9A-HJKMNP-TV-Z]{26}$/
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -24,6 +27,7 @@ const TOKENS = ['STX', 'sBTC', 'USDCx'] as const
 
 export const analyticsRouter = new Hono<AppEnv>()
 
+// Public endpoint — no auth required (analytics is the Explorer, public by design)
 analyticsRouter.get('/:serverId/analytics', async (c) => {
   const serverId = c.req.param('serverId')
 
@@ -87,4 +91,47 @@ analyticsRouter.get('/:serverId/analytics', async (c) => {
     },
     daily,
   })
+})
+
+// ─── Transaction Log (public Explorer) ──────────────────────────────────────
+
+analyticsRouter.get('/transactions', async (c) => {
+  const redis = c.get('redis')
+  const page = parseInt(c.req.query('page') ?? '1', 10)
+  const limit = Math.min(parseInt(c.req.query('limit') ?? '24', 10), 100)
+  const filterServerId = c.req.query('serverId')
+  const filterAgentId = c.req.query('agentId')
+
+  const start = (page - 1) * limit
+  const end = start + limit - 1
+
+  try {
+    // Get transaction entries from sorted set (newest first)
+    const entries = await redis.zrevrange('transactions:log', start, end)
+    const total = await redis.zcard('transactions:log')
+
+    const transactions = entries.map((entry: string) => {
+      try {
+        return JSON.parse(entry)
+      } catch {
+        return null
+      }
+    }).filter(Boolean).filter((tx: any) => {
+      if (filterServerId && tx.serverId !== filterServerId) return false
+      if (filterAgentId && tx.agentId !== filterAgentId) return false
+      return true
+    })
+
+    return c.json({
+      transactions,
+      pagination: {
+        page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit),
+      },
+    })
+  } catch {
+    return c.json({ transactions: [], pagination: { page: 1, limit, total: 0, pages: 0 } })
+  }
 })

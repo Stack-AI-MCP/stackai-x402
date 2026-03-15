@@ -38,7 +38,7 @@ interface IntrospectedTool {
 interface RegistrationResult {
   serverId: string
   gatewayUrl: string
-  ownerKey: string
+  ownerAddress: string
 }
 
 function CopyButton({ text }: { text: string }) {
@@ -238,14 +238,13 @@ export function ServerRegisterForm({ defaultUrl = '' }: { defaultUrl?: string })
             </div>
 
             <div>
-              <label className="text-xs font-medium text-muted-foreground">Owner Key</label>
-              <div className="flex items-center rounded-md border border-amber-500/50 bg-amber-500/10 px-3 py-2 font-mono text-sm">
-                <span className="flex-1 truncate">{result.ownerKey}</span>
-                <CopyButton text={result.ownerKey} />
+              <label className="text-xs font-medium text-muted-foreground">Owner Address</label>
+              <div className="flex items-center rounded-md border bg-muted/50 px-3 py-2 font-mono text-sm">
+                <span className="flex-1 truncate">{result.ownerAddress}</span>
+                <CopyButton text={result.ownerAddress} />
               </div>
-              <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">
-                Save this key — it won&apos;t be shown again. You need it to update your server
-                configuration.
+              <p className="mt-1 text-xs text-muted-foreground">
+                Your connected wallet address owns this server registration.
               </p>
             </div>
           </div>

@@ -7,6 +7,7 @@ import {
   isConnected as stacksIsConnected,
   getLocalStorage,
   isStacksWalletInstalled,
+  request,
 } from '@stacks/connect'
 import {
   fetchCallReadOnlyFunction,
@@ -21,6 +22,11 @@ export interface WalletBalances {
   usdcx: string
 }
 
+export interface SignMessageResult {
+  signature: string
+  publicKey: string
+}
+
 export interface X402WalletState {
   address: string | null
   publicKey: string | null
@@ -32,6 +38,7 @@ export interface X402WalletState {
   connectWallet: () => Promise<void>
   disconnectWallet: () => void
   refreshBalances: () => Promise<void>
+  signMessage: (message: string) => Promise<SignMessageResult>
 }
 
 export const X402WalletContext = createContext<X402WalletState | null>(null)
@@ -171,6 +178,15 @@ export function X402WalletProvider({ children }: { children: React.ReactNode }) 
     }
   }, [])
 
+  const signMessage = useCallback(async (message: string): Promise<SignMessageResult> => {
+    if (!address) throw new Error('Wallet not connected')
+    const result = await request('stx_signMessage', { message })
+    return {
+      signature: result.signature,
+      publicKey: result.publicKey ?? publicKey ?? '',
+    }
+  }, [address, publicKey])
+
   const disconnectWallet = useCallback(() => {
     stacksDisconnect()
     setAddress(null)
@@ -191,6 +207,7 @@ export function X402WalletProvider({ children }: { children: React.ReactNode }) 
       connectWallet,
       disconnectWallet,
       refreshBalances,
+      signMessage,
     }),
     [
       address,
@@ -202,6 +219,7 @@ export function X402WalletProvider({ children }: { children: React.ReactNode }) 
       connectWallet,
       disconnectWallet,
       refreshBalances,
+      signMessage,
     ],
   )
 

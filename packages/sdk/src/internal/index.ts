@@ -44,4 +44,12 @@ export interface RedisLike {
   pfadd(key: string, ...elements: string[]): Promise<number>
   /** HyperLogLog count — approximate unique element count. */
   pfcount(key: string): Promise<number>
+  /** Sorted set — add member with score. */
+  zadd(key: string, score: number, member: string): Promise<number>
+  /** Sorted set — get members in reverse score order (newest first). */
+  zrevrange(key: string, start: number, stop: number): Promise<string[]>
+  /** Sorted set — count all members. */
+  zcard(key: string): Promise<number>
+  /** Sorted set — remove a member. */
+  zrem(key: string, member: string): Promise<number>
 }

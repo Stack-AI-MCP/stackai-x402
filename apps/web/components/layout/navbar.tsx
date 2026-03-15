@@ -18,16 +18,18 @@ import { useState, useEffect } from 'react'
 
 const desktopLinks = [
   { href: '/marketplace',  label: 'BROWSE' },
+  { href: '/agents',       label: 'AGENTS' },
   { href: '/register',     label: 'MONETIZE' },
-  { href: '/analytics',    label: 'ANALYTICS' },
+  { href: '/analytics',    label: 'EXPLORER' },
 ]
 
 const mobileLinks = [
   { href: '/',             label: 'HOME' },
   { href: '/marketplace',  label: 'BROWSE' },
+  { href: '/agents',       label: 'AGENTS' },
   { href: '/register',     label: 'MONETIZE' },
   { href: '/chat',         label: 'CHAT' },
-  { href: '/analytics',    label: 'ANALYTICS' },
+  { href: '/analytics',    label: 'EXPLORER' },
 ]
 
 const linkBase =

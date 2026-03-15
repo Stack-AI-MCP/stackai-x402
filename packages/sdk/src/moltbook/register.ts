@@ -1,3 +1,14 @@
+/**
+ * One-shot Moltbook agent registration.
+ *
+ * For ongoing Moltbook engagement (heartbeats, feed browsing, verified posting
+ * with challenge solving), use the standalone `stackai-moltbook` service instead.
+ * This function provides one-shot registration only — it does NOT solve
+ * verification challenges or run heartbeat loops.
+ *
+ * @see https://github.com/stackai/stackai-moltbook
+ */
+
 // ─── Error types ──────────────────────────────────────────────────────────────
 
 export type MoltbookErrorCode = 'API_UNAVAILABLE' | 'AUTH_FAILED' | 'INVALID_RESPONSE'
@@ -36,7 +47,8 @@ export interface MoltbookRegistrationResult {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const MOLTBOOK_API_BASE = 'https://api.moltbook.com/v1'
+// Base URL per Moltbook skill.md — always use www prefix
+const MOLTBOOK_API_BASE = 'https://www.moltbook.com/api/v1'
 
 // ─── Internal helpers ─────────────────────────────────────────────────────────
 
@@ -44,13 +56,14 @@ async function moltbookFetch(
   path: string,
   apiKey: string,
   body: Record<string, unknown>,
+  method: 'POST' | 'PATCH' = 'POST',
 ): Promise<Response> {
   const url = `${MOLTBOOK_API_BASE}${path}`
 
   let res: Response
   try {
     res = await fetch(url, {
-      method: 'POST',
+      method,
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${apiKey}`,
@@ -89,29 +102,44 @@ export async function registerMoltbookAgent(opts: {
 }): Promise<MoltbookRegistrationResult> {
   const { serverConfig, moltbookApiKey } = opts
 
-  // Step 1: Create agent
-  const createRes = await moltbookFetch('/agents', moltbookApiKey, {
+  // Step 1: Register agent — POST /api/v1/agents/register per Moltbook skill.md
+  const createRes = await moltbookFetch('/agents/register', moltbookApiKey, {
     name: serverConfig.name,
     description: serverConfig.description,
-    capabilities: serverConfig.toolNames,
-    gatewayUrl: serverConfig.gatewayUrl,
   })
 
+  // Moltbook registration returns: api_key, claim_url, verification_code
   let agentId: string
   let claimUrl: string
   try {
-    const data = (await createRes.json()) as { agentId?: string; claimUrl?: string }
-    if (!data.agentId || !data.claimUrl) {
-      throw new MoltbookError('INVALID_RESPONSE', 'Missing agentId or claimUrl in Moltbook response')
+    const data = (await createRes.json()) as {
+      api_key?: string
+      claim_url?: string
+      verification_code?: string
+      // Fallback to camelCase in case API changes
+      agentId?: string
+      claimUrl?: string
     }
-    agentId = data.agentId
-    claimUrl = data.claimUrl
+    agentId = data.api_key ?? data.agentId ?? ''
+    claimUrl = data.claim_url ?? data.claimUrl ?? ''
+    if (!agentId || !claimUrl) {
+      throw new MoltbookError('INVALID_RESPONSE', 'Missing api_key or claim_url in Moltbook response')
+    }
   } catch (err) {
     if (err instanceof MoltbookError) throw err
     throw new MoltbookError('INVALID_RESPONSE', 'Failed to parse Moltbook response')
   }
 
-  // Step 2: Auto-post capabilities announcement (best-effort — NFR14, FR48)
+  // Step 2: Update agent description with capabilities (best-effort, PATCH /agents/me)
+  try {
+    await moltbookFetch('/agents/me', moltbookApiKey, {
+      description: `${serverConfig.description}\n\nTools: ${serverConfig.toolNames.join(', ')}\nGateway: ${serverConfig.gatewayUrl}`,
+    }, 'PATCH')
+  } catch (err) {
+    console.warn('[moltbook] Failed to update description:', err instanceof Error ? err.message : err)
+  }
+
+  // Step 3: Post capabilities announcement (best-effort — Moltbook posts API)
   try {
     const toolList = serverConfig.toolPricing?.length
       ? serverConfig.toolPricing
@@ -120,7 +148,7 @@ export async function registerMoltbookAgent(opts: {
       : serverConfig.toolNames.map((t) => `- ${t}`).join('\n')
 
     const content = [
-      `🤖 ${serverConfig.name} is now live!`,
+      `${serverConfig.name} is now live on x402!`,
       '',
       serverConfig.description,
       '',
@@ -130,9 +158,14 @@ export async function registerMoltbookAgent(opts: {
       `Gateway: ${serverConfig.gatewayUrl}`,
     ].join('\n')
 
-    await moltbookFetch(`/agents/${agentId}/posts`, moltbookApiKey, { content })
+    // Post to a submolt if available, otherwise just announce
+    await moltbookFetch('/posts', moltbookApiKey, {
+      title: `${serverConfig.name} — x402 Agent`,
+      content,
+      type: 'text',
+    })
   } catch (err) {
-    // Best-effort — capabilities post failure does not affect registration (NFR14)
+    // Best-effort — post failure does not affect registration
     console.warn('[moltbook] Failed to post capabilities:', err instanceof Error ? err.message : err)
   }
 

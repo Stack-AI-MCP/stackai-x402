@@ -29,7 +29,7 @@ agentCardRouter.get('/', async (c) => {
     return c.json({ error: 'Server data is corrupted', code: 'INTERNAL_ERROR' }, 500)
   }
 
-  // Never expose upstreamAuth, ownerKey, or internal fields
+  // Never expose upstreamAuth, ownerAddress, or internal fields
   return c.json({
     name: config.name,
     description: config.description,

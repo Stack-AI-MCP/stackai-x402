@@ -438,6 +438,7 @@ function ChatPageInner() {
                       state === 'input-available' || state === 'input-streaming'
                     const hasOutput = state === 'output-available' && 'output' in part
                     const hasError = state === 'output-error' && 'errorText' in part
+                    const isUnknown = !isRunning && !hasOutput && !hasError && state !== ''
 
                     return (
                       <div
@@ -483,6 +484,12 @@ function ChatPageInner() {
                         {hasError && (
                           <div className="mt-2 text-xs text-destructive">
                             {(part as { errorText: string }).errorText}
+                          </div>
+                        )}
+
+                        {isUnknown && (
+                          <div className="mt-2 text-xs text-muted-foreground">
+                            Tool timed out or returned no result.
                           </div>
                         )}
                       </div>

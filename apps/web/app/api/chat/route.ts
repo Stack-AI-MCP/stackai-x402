@@ -93,6 +93,10 @@ function buildTools(agentCard: AgentCard, serverId: string): ToolSet {
             method: t.name,
             params: args,
           }),
+          signal: AbortSignal.timeout(30_000),
+        }).catch((err: unknown) => {
+          const msg = err instanceof Error ? err.message : 'Request timed out'
+          throw new Error(`Tool "${t.name}" failed: ${msg}`)
         })
 
         // 402 = paid tool — extract payment requirements for client-side PaymentCard

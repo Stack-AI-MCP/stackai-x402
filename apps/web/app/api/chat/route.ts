@@ -5,11 +5,44 @@ import {
   stepCountIs,
   tool,
   jsonSchema,
+  convertToModelMessages,
   type ToolSet,
+  type UIMessage,
 } from 'ai'
 import { createOpenAI } from '@ai-sdk/openai'
 
 const GATEWAY_URL = process.env.NEXT_PUBLIC_GATEWAY_URL ?? 'http://localhost:3001'
+
+const DEFAULT_MODEL = 'anthropic/claude-sonnet-4'
+
+/**
+ * Replace any tool-call parts whose output is a __paymentRequired marker with
+ * a plain text result so the model sees a clean, valid tool-result in history.
+ * Also deep-clones to avoid reference contamination in AI SDK v5 beta.
+ */
+function sanitizeMessages(messages: UIMessage[]): UIMessage[] {
+  // Deep clone to avoid AI SDK v5 beta reference contamination bug
+  const cloned = JSON.parse(JSON.stringify(messages)) as UIMessage[]
+  return cloned.map((msg) => {
+    if (msg.role !== 'assistant') return msg
+    const cleanParts = (msg.parts ?? []).map((part) => {
+      const p = part as Record<string, unknown>
+      if (
+        typeof p.type === 'string' &&
+        p.type.startsWith('tool-') &&
+        typeof p.output === 'object' &&
+        p.output !== null &&
+        (p.output as Record<string, unknown>).__paymentRequired === true
+      ) {
+        // Replace the payment marker with a neutral string result so Anthropic
+        // doesn't choke on a malformed tool_use/tool_result pair in history.
+        return { ...p, output: 'Payment required — awaiting user approval.' } as (typeof msg.parts)[number]
+      }
+      return part
+    }) as typeof msg.parts
+    return { ...msg, parts: cleanParts }
+  })
+}
 
 export const maxDuration = 60
 
@@ -164,16 +197,21 @@ export async function POST(request: Request) {
     tools = filtered
   }
 
+  const paymentInstructions = `
+Some tools require a small payment to run. When a tool returns { __paymentRequired: true }, briefly tell the user which tool needs payment and wait for them to approve it.
+
+IMPORTANT: When you receive a user message that starts with "__paid_continue__", it means the payment was just approved and processed. The JSON that follows contains { toolName, result } — the actual tool output. Use this result to answer the original question directly and naturally, as if the tool had just succeeded. Do NOT mention the payment mechanics, do NOT say "payment settled", do NOT echo the raw JSON — just give a clean, helpful answer based on the result data.`.trim()
+
   const systemPrompt = safeSystemPrompt
-    ? `${safeSystemPrompt}\n\nSome tools require payment — if a tool returns a __paymentRequired result, inform the user that payment approval is needed and wait for them to approve or reject.`
-    : `You are a helpful assistant with access to the "${agentCard.name}" MCP server. ${agentCard.description ?? ''}\n\nUse the available tools when they can help answer the user's question. Some tools require payment — if a tool returns a __paymentRequired result, inform the user that payment approval is needed and wait for them to approve or reject.`
+    ? `${safeSystemPrompt}\n\n${paymentInstructions}`
+    : `You are a helpful assistant with access to the "${agentCard.name}" MCP server. ${agentCard.description ?? ''}\n\nUse the available tools when they can help answer the user's question.\n\n${paymentInstructions}`
 
   const stream = createUIMessageStream({
     execute: ({ writer: dataStream }) => {
       const result = streamText({
-        model: openrouter(modelId ?? 'anthropic/claude-sonnet-4'),
+        model: openrouter.chat(modelId ?? DEFAULT_MODEL),
         system: systemPrompt,
-        messages,
+        messages: convertToModelMessages(sanitizeMessages(messages)),
         tools,
         stopWhen: stepCountIs(10),
       })

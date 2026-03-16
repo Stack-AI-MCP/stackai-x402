@@ -10,7 +10,7 @@
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
-    "ai": "5.0.0-beta.6",
+    "@ai-sdk/anthropic": "^2.0.70",
     "@ai-sdk/openai": "^2.0.4",
     "@ai-sdk/provider": "2.0.0-beta.1",
     "@ai-sdk/react": "2.0.0-beta.6",
@@ -31,6 +31,7 @@
     "@stacks/connect": "^8.2.0",
     "@stacks/network": "^7.2.0",
     "@stacks/transactions": "^7.2.0",
+    "ai": "5.0.0-beta.6",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "embla-carousel-react": "^8.6.0",

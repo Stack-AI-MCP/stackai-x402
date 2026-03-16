@@ -63,6 +63,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@ai-sdk/anthropic':
+        specifier: ^2.0.70
+        version: 2.0.70(zod@3.25.76)
       '@ai-sdk/openai':
         specifier: ^2.0.4
         version: 2.0.99(zod@3.25.76)
@@ -229,6 +232,12 @@ packages:
 
   '@adraffy/ens-normalize@1.11.1':
     resolution: {integrity: sha512-nhCBV3quEgesuf7c7KYfperqSS14T8bYuvJ8PcLJp6znkZpFc0AuW4qBtr8eKVyPPe/8RSr7sglCWPU5eaxwKQ==}
+
+  '@ai-sdk/anthropic@2.0.70':
+    resolution: {integrity: sha512-W3WjQlb0Ho+CVAQUvb8Rtk3hGS3Jlgy79ihY2H0yj2k4yU8XuxpQw0Oz+7JQsB47j+jlHhk7nUXtxhAeRg3S3Q==}
+    engines: {node: '>=18'}
+    peerDependencies:
+      zod: ^3.25.76 || ^4.1.8
 
   '@ai-sdk/gateway@1.0.0-beta.3':
     resolution: {integrity: sha512-g49gMSkXy94lYvl5LRh438OR/0JCG6ol0jV+iLot7cy5HLltZlGocEuauETBu4b10mDXOd7XIjTEZoQpYFMYLQ==}
@@ -3873,6 +3882,12 @@ packages:
 snapshots:
 
   '@adraffy/ens-normalize@1.11.1': {}
+
+  '@ai-sdk/anthropic@2.0.70(zod@3.25.76)':
+    dependencies:
+      '@ai-sdk/provider': 2.0.1
+      '@ai-sdk/provider-utils': 3.0.22(zod@3.25.76)
+      zod: 3.25.76
 
   '@ai-sdk/gateway@1.0.0-beta.3(zod@3.25.76)':
     dependencies:

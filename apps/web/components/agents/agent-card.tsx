@@ -19,7 +19,7 @@ interface AgentCardProps {
  */
 export function AgentCard({ agentId, name, description, toolCount, moltbookName, network }: AgentCardProps) {
   return (
-    <div className="group flex flex-col gap-4 rounded-[2px] border border-border bg-card p-5 transition-all hover:border-foreground/20 hover:shadow-sm">
+    <div className="group flex flex-col gap-4 rounded-xl border border-border bg-card p-5 card-glow hover:border-primary/40">
       {/* Header: name + badges */}
       <div className="space-y-2">
         <div className="flex items-start justify-between gap-2">

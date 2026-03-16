@@ -4,9 +4,10 @@ import { useParams, useSearchParams } from 'next/navigation'
 import { useChat } from '@ai-sdk/react'
 import { DefaultChatTransport } from 'ai'
 import { Suspense, useState, useRef, useEffect, useCallback, useMemo } from 'react'
-import { Send, Loader2, Bot, User, Wrench } from 'lucide-react'
+import { Loader2, Bot, User, Wrench, CheckCircle2, ChevronDown, ChevronUp } from 'lucide-react'
 import { request } from '@stacks/connect'
 import { ModelSelector, DEFAULT_MODEL } from '@/components/x402/ModelSelector'
+import { ChatInput } from '@/components/x402/ChatInput'
 import {
   PaymentCard,
   type PaymentRequirement,
@@ -38,6 +39,32 @@ function isPaymentOutput(output: unknown): output is {
   )
 }
 
+// Collapsible tool result component — works for any MCP output shape
+function ToolResult({ output }: { output: unknown }) {
+  const [expanded, setExpanded] = useState(false)
+  const formatted =
+    typeof output === 'string' ? output : JSON.stringify(output, null, 2)
+  const lines = formatted.split('\n')
+  const isLong = lines.length > 6
+
+  return (
+    <div className="mt-2">
+      <pre className={`whitespace-pre-wrap text-xs text-muted-foreground leading-relaxed overflow-auto rounded-lg bg-background/60 p-2 ${isLong && !expanded ? 'max-h-[7rem]' : 'max-h-[32rem]'}`}>
+        {formatted}
+      </pre>
+      {isLong && (
+        <button
+          onClick={() => setExpanded((v) => !v)}
+          className="mt-1 flex items-center gap-1 text-[10px] font-mono text-muted-foreground hover:text-foreground transition-colors"
+        >
+          {expanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+          {expanded ? 'collapse' : `show ${lines.length - 6} more lines`}
+        </button>
+      )}
+    </div>
+  )
+}
+
 function ChatPageInner() {
   const { serverId } = useParams<{ serverId: string }>()
   const searchParams = useSearchParams()
@@ -48,6 +75,16 @@ function ChatPageInner() {
   modelRef.current = model
   const wallet = useX402Wallet()
   const [paymentStatuses, setPaymentStatuses] = useState<Record<string, PaymentStatusEntry>>({})
+  const [serverName, setServerName] = useState<string | null>(null)
+
+  // Fetch server name from agent card
+  const GATEWAY_URL = process.env.NEXT_PUBLIC_GATEWAY_URL ?? 'http://localhost:3001'
+  useEffect(() => {
+    fetch(`${GATEWAY_URL}/.well-known/agent.json?server=${encodeURIComponent(serverId)}`)
+      .then((r) => r.ok ? r.json() : null)
+      .then((card) => { if (card?.name) setServerName(card.name) })
+      .catch(() => {})
+  }, [serverId, GATEWAY_URL])
 
   // Decode agent config from ?agent= query param (set by Composer)
   const agentConfig = useMemo<AgentConfig | null>(() => {
@@ -76,9 +113,10 @@ function ChatPageInner() {
       new DefaultChatTransport({
         api: '/api/chat',
         body: { serverId, model: modelRef.current },
-        prepareSendMessagesRequest: ({ body }) => ({
+        prepareSendMessagesRequest: ({ body, messages }) => ({
           body: {
             ...body,
+            messages,
             model: modelRef.current,
             ...(agentConfigRef.current && {
               systemPrompt: agentConfigRef.current.systemPrompt,
@@ -243,6 +281,19 @@ function ChatPageInner() {
         }))
 
         wallet.refreshBalances()
+
+        // Auto-continue: feed the real tool result back to the AI so it can respond naturally.
+        // The system prompt instructs the AI to parse __paid_continue__ and answer directly.
+        if (result.toolResult !== undefined) {
+          const continuationText = `__paid_continue__ ${JSON.stringify({
+            toolName: paymentData.toolName,
+            result: result.toolResult,
+          })}`
+          sendMessage({
+            role: 'user' as const,
+            parts: [{ type: 'text' as const, text: continuationText }],
+          })
+        }
       } catch (err) {
         // Unexpected error (tx building, network, etc.)
         setPaymentStatuses((prev) => ({
@@ -269,64 +320,75 @@ function ChatPageInner() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
-  const handleSubmit = useCallback(
-    (e: React.FormEvent) => {
-      e.preventDefault()
-      const text = input.trim()
-      if (!text || isLoading) return
-      setInput('')
-      sendMessage({ role: 'user' as const, parts: [{ type: 'text' as const, text }] })
-    },
-    [input, isLoading, sendMessage],
-  )
+  const handleSubmit = useCallback(() => {
+    const text = input.trim()
+    if (!text || isLoading) return
+    setInput('')
+    sendMessage({ role: 'user' as const, parts: [{ type: 'text' as const, text }] })
+  }, [input, isLoading, sendMessage])
+
+  const defaultStarterPrompts = [
+    "What's the current STX price?",
+    'Show me ALEX DeFi pools',
+    'How do I deposit sBTC?',
+    'Explain Arkadiko lending',
+  ]
+
+  const activeStarterPrompts =
+    agentConfig?.starterPrompts?.length ? agentConfig.starterPrompts : defaultStarterPrompts
 
   return (
     <div className="flex h-[calc(100vh-8rem)] flex-col">
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-border pb-3">
+      <div className="flex items-center justify-between border-b border-border pb-3 shrink-0">
         <div>
           <h1 className="text-lg font-semibold">
-            {agentConfig?.name ?? 'Chat'}
+            {agentConfig?.name ?? serverName ?? 'Chat'}
           </h1>
           <p className="text-xs text-muted-foreground">Server: {serverId}</p>
         </div>
-        <ModelSelector value={model} onChange={setModel} />
       </div>
 
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto py-4">
-        {messages.length === 0 && (
-          <div className="flex h-full flex-col items-center justify-center gap-4">
-            <p className="text-sm text-muted-foreground">
-              {agentConfig
-                ? `Start chatting with ${agentConfig.name}`
-                : 'Send a message to start chatting with this server\u2019s tools.'}
-            </p>
-            {agentConfig?.starterPrompts && agentConfig.starterPrompts.length > 0 && (
-              <div className="w-full max-w-md space-y-2">
-                {agentConfig.starterPrompts.map((prompt) => (
-                  <button
-                    key={prompt}
-                    type="button"
-                    disabled={isLoading}
-                    onClick={() => {
-                      setInput('')
-                      sendMessage({
-                        role: 'user' as const,
-                        parts: [{ type: 'text' as const, text: prompt }],
-                      })
-                    }}
-                    className="block w-full rounded-md border border-border p-3 text-left text-sm transition-colors hover:border-primary/50 hover:bg-primary/5 disabled:opacity-50"
-                  >
-                    {prompt}
-                  </button>
-                ))}
+      {/* Messages — min-h-0 is critical so flex child can scroll */}
+      <div className="flex-1 overflow-y-auto min-h-0">
+        {messages.length === 0 ? (
+          <div className="h-full flex flex-col items-center justify-center gap-8 px-4">
+            {/* Empty state hero */}
+            <div className="text-center space-y-2">
+              <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center mx-auto">
+                <Bot className="h-6 w-6 text-primary" />
               </div>
-            )}
+              <h2 className="font-semibold">
+                {agentConfig?.name ?? serverName ?? 'Chat'}
+              </h2>
+              <p className="text-sm text-muted-foreground max-w-sm">
+                Ask anything — free tools run instantly, paid tools show a payment prompt before executing.
+              </p>
+            </div>
+            {/* Starter prompts grid */}
+            <div className="grid grid-cols-2 gap-2 w-full max-w-lg">
+              {activeStarterPrompts.map((prompt) => (
+                <button
+                  key={prompt}
+                  type="button"
+                  disabled={isLoading}
+                  onClick={() => {
+                    setInput('')
+                    sendMessage({
+                      role: 'user' as const,
+                      parts: [{ type: 'text' as const, text: prompt }],
+                    })
+                  }}
+                  className="rounded-xl border border-border bg-card/50 p-3 text-left text-xs hover:border-primary/40 hover:bg-card card-glow disabled:opacity-50"
+                >
+                  {prompt}
+                </button>
+              ))}
+            </div>
           </div>
-        )}
+        ) : null}
 
-        <div className="space-y-4">
+        <div className="space-y-4 py-4">
           {messages.map((message) => (
             <div key={message.id} className="flex gap-3">
               <div
@@ -346,14 +408,27 @@ function ChatPageInner() {
               <div className="min-w-0 flex-1 space-y-2">
                 {message.parts?.map((part, i) => {
                   if (part.type === 'text') {
+                    // Hide __paid_continue__ messages from the visible chat —
+                    // show a compact "payment settled" chip instead
+                    if (part.text.startsWith('__paid_continue__')) {
+                      return (
+                        <div
+                          key={`sys-${i}`}
+                          className="inline-flex items-center gap-1.5 rounded-full bg-teal-500/10 px-3 py-1 text-[11px] font-mono text-teal-500"
+                        >
+                          <CheckCircle2 className="h-3 w-3" />
+                          payment settled — processing result…
+                        </div>
+                      )
+                    }
                     return (
-                      <div key={`text-${i}`} className="whitespace-pre-wrap text-sm">
+                      <div key={`text-${i}`} className="whitespace-pre-wrap text-sm leading-relaxed">
                         {part.text}
                       </div>
                     )
                   }
 
-                  // Tool parts follow `tool-{name}` pattern (same as components/message.tsx)
+                  // Tool parts follow `tool-{name}` pattern
                   if (part.type.startsWith('tool-')) {
                     const toolName = part.type.replace(/^tool-/, '')
                     const toolCallId =
@@ -367,12 +442,17 @@ function ChatPageInner() {
                     return (
                       <div
                         key={toolCallId}
-                        className="rounded-md border border-border bg-muted/30 p-3"
+                        className="rounded-xl border border-border bg-muted/20 p-3"
                       >
-                        <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
-                          <Wrench className="h-3 w-3" />
-                          {toolName}
-                          {isRunning && <Loader2 className="h-3 w-3 animate-spin" />}
+                        <div className="flex items-center gap-2 text-xs font-mono font-medium text-muted-foreground">
+                          <Wrench className="h-3 w-3 text-primary/60" />
+                          <span className="text-primary/80">{toolName}</span>
+                          {isRunning && (
+                            <>
+                              <Loader2 className="h-3 w-3 animate-spin" />
+                              <span className="text-[10px]">running…</span>
+                            </>
+                          )}
                         </div>
 
                         {hasOutput && (() => {
@@ -380,7 +460,7 @@ function ChatPageInner() {
                           if (isPaymentOutput(output)) {
                             const entry = paymentStatuses[toolCallId]
                             return (
-                              <>
+                              <div className="mt-2">
                                 <PaymentCard
                                   toolName={output.toolName}
                                   payment={output.payment}
@@ -393,28 +473,16 @@ function ChatPageInner() {
                                   }
                                   onReject={() => handlePaymentReject(toolCallId)}
                                 />
-                                {entry?.toolResult && (
-                                  <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap text-xs text-muted-foreground">
-                                    {typeof entry.toolResult === 'string'
-                                      ? entry.toolResult
-                                      : JSON.stringify(entry.toolResult, null, 2)}
-                                  </pre>
-                                )}
-                              </>
+                              </div>
                             )
                           }
-                          return (
-                            <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap text-xs text-muted-foreground">
-                              {typeof output === 'string'
-                                ? output
-                                : JSON.stringify(output, null, 2)}
-                            </pre>
-                          )
+                          // Free tool result — collapsible JSON viewer
+                          return <ToolResult output={output} />
                         })()}
 
                         {hasError && (
                           <div className="mt-2 text-xs text-destructive">
-                            Error: {(part as { errorText: string }).errorText}
+                            {(part as { errorText: string }).errorText}
                           </div>
                         )}
                       </div>
@@ -445,29 +513,24 @@ function ChatPageInner() {
 
       {/* Error */}
       {error && (
-        <div className="mb-2 rounded-md border border-destructive/50 bg-destructive/10 p-2 text-xs text-destructive">
+        <div className="mb-2 rounded-xl border border-destructive/50 bg-destructive/10 p-2 text-xs text-destructive shrink-0">
           {error.message}
         </div>
       )}
 
-      {/* Input */}
-      <form onSubmit={handleSubmit} className="flex gap-2 border-t border-border pt-3">
-        <input
-          type="text"
+      {/* Input area */}
+      <div className="shrink-0 space-y-2 border-t border-border pt-3">
+        <div className="flex items-center justify-end">
+          <ModelSelector value={model} onChange={setModel} />
+        </div>
+        <ChatInput
           value={input}
-          onChange={(e) => setInput(e.target.value)}
-          placeholder="Ask something..."
-          className="flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+          onChange={setInput}
+          onSubmit={handleSubmit}
+          isLoading={isLoading}
+          placeholder="Ask about Stacks DeFi, sBTC, ALEX…"
         />
-        <button
-          type="submit"
-          disabled={isLoading || !input.trim()}
-          aria-label="Send message"
-          className="rounded-md bg-primary px-3 py-2 text-white hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          <Send className="h-4 w-4" />
-        </button>
-      </form>
+      </div>
     </div>
   )
 }

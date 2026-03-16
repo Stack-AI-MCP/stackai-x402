@@ -6,7 +6,18 @@ export default function HomeLayout({
   children: React.ReactNode
 }) {
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background relative">
+      {/* Radial accent glow at the top — same trick MIDL uses */}
+      <div
+        aria-hidden
+        className="pointer-events-none fixed inset-0 z-0"
+        style={{
+          background:
+            'radial-gradient(ellipse 80% 40% at 50% -10%, rgba(234,88,12,0.07) 0%, transparent 70%)',
+        }}
+      />
+      {/* Content above gradient */}
+      <div className="relative z-10">
       {/* Secondary sticky sub-nav — sits directly below the global navbar */}
       <header className="sticky top-12 z-30 border-b border-border bg-background/90 backdrop-blur-sm">
         <div className="mx-auto flex h-11 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
@@ -32,6 +43,7 @@ export default function HomeLayout({
       {/* Mobile bottom nav */}
       <div className="fixed bottom-0 left-0 right-0 z-50 border-t border-border bg-background/95 backdrop-blur-sm md:hidden">
         <TabNav mobile />
+      </div>
       </div>
     </div>
   )

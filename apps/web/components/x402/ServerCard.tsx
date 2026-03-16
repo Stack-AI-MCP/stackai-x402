@@ -63,7 +63,7 @@ export function ServerCard({
   return (
     <div
       onClick={handleNavigate}
-      className="group rounded-[2px] border border-border bg-card hover:border-foreground/60 hover:shadow-md transition-all duration-200 cursor-pointer flex flex-col"
+      className="group rounded-xl border border-border bg-card hover:border-primary/40 cursor-pointer flex flex-col card-glow"
     >
       {/* Main card body */}
       <div className="p-5 flex-1 space-y-4">
@@ -99,7 +99,7 @@ export function ServerCard({
               {network === 'testnet' && (
                 <>
                   <span className="text-muted-foreground/40">·</span>
-                  <span className="inline-flex items-center px-1.5 py-0.5 text-[9px] font-mono font-bold uppercase tracking-widest bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 rounded-[2px]">
+                  <span className="inline-flex items-center px-1.5 py-0.5 text-[9px] font-mono font-bold uppercase tracking-widest bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 rounded-md">
                     TESTNET
                   </span>
                 </>
@@ -132,7 +132,7 @@ export function ServerCard({
       <div className="px-3 py-2 flex items-center gap-1">
         <button
           onClick={handleCopy}
-          className="flex-1 flex items-center justify-center gap-1.5 py-1.5 text-[10px] font-mono uppercase tracking-wider text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-all rounded-[2px]"
+          className="flex-1 flex items-center justify-center gap-1.5 py-1.5 text-[10px] font-mono uppercase tracking-wider text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-all rounded-lg"
           title="Copy MCP endpoint URL"
         >
           {copied
@@ -143,7 +143,7 @@ export function ServerCard({
         <div className="w-px h-4 bg-border/50" />
         <button
           onClick={handleChat}
-          className="flex-1 flex items-center justify-center gap-1.5 py-1.5 text-[10px] font-mono uppercase tracking-wider text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-all rounded-[2px]"
+          className="flex-1 flex items-center justify-center gap-1.5 py-1.5 text-[10px] font-mono uppercase tracking-wider text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-all rounded-lg"
         >
           <MessageSquare className="h-3 w-3" />
           CHAT →
@@ -151,7 +151,7 @@ export function ServerCard({
         <div className="w-px h-4 bg-border/50" />
         <button
           onClick={handleNavigate}
-          className="flex-1 flex items-center justify-center gap-1.5 py-1.5 text-[10px] font-mono uppercase tracking-wider text-primary hover:bg-primary/5 transition-all rounded-[2px]"
+          className="flex-1 flex items-center justify-center gap-1.5 py-1.5 text-[10px] font-mono uppercase tracking-wider text-primary hover:bg-primary/5 transition-all rounded-lg"
         >
           <Play className="h-3 w-3" />
           EXPLORE

@@ -99,7 +99,7 @@ export function StatsSection() {
               whileInView={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.5, delay: idx * 0.1 }}
               viewport={{ once: true }}
-              className="group rounded-xl border border-border bg-card/50 p-6 hover:border-primary/30 hover:bg-card transition-all duration-200 card-hover"
+              className="group rounded-xl border border-border bg-card/50 p-6 hover:border-primary/30 hover:bg-card card-glow"
             >
               <div className={`inline-flex items-center justify-center w-12 h-12 rounded-xl ${stat.bg} mb-4 group-hover:scale-110 transition-transform duration-200`}>
                 <stat.icon className={`h-5 w-5 ${stat.color}`} />

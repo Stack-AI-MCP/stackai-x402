@@ -144,15 +144,19 @@ export async function handleProxy(c: Context<AppEnv>, serverId: string): Promise
       // No payment yet — issue 402 with V2 Coinbase-compatible payment requirements
       const caip2 = networkToCAIP2(network)
 
-      // Build one PaymentRequirementsV2 entry per accepted token
-      const accepts: PaymentRequirementsV2[] = config.acceptedTokens.map((token) => ({
-        scheme: 'exact',
-        network: caip2,
-        amount: usdToMicro(tool.price, token, tokenPrices[token]).toString(),
-        asset: token,
-        payTo: config.recipientAddress,
-        maxTimeoutSeconds: 300,
-      }))
+      // Build one PaymentRequirementsV2 entry per accepted token.
+      // Filter out tokens where the USD amount is too small to represent
+      // (e.g. $0.0001 in sBTC at $100k rounds to 0 satoshis).
+      const accepts: PaymentRequirementsV2[] = config.acceptedTokens
+        .map((token) => ({
+          scheme: 'exact' as const,
+          network: caip2,
+          amount: usdToMicro(tool.price, token, tokenPrices[token]).toString(),
+          asset: token,
+          payTo: config.recipientAddress,
+          maxTimeoutSeconds: 300,
+        }))
+        .filter((entry) => entry.amount !== '0')
 
       const paymentRequired: PaymentRequiredV2 = {
         x402Version: 2,
@@ -173,17 +177,91 @@ export async function handleProxy(c: Context<AppEnv>, serverId: string): Promise
       return c.json({ error: 'Invalid payment-signature: must be base64-encoded PaymentPayloadV2 JSON', code: 'INVALID_REQUEST' }, 400)
     }
 
-    // Settle payment via relay (X402PaymentVerifier or injected test override)
+    // Reject zero-amount payments early (e.g. sBTC at very low USD prices)
+    if (!paymentPayload.accepted?.amount || paymentPayload.accepted.amount === '0') {
+      return c.json({ error: 'Payment amount is zero — choose a different token', code: 'AMOUNT_INSUFFICIENT' }, 402)
+    }
+
+    // Settle payment by verifying the broadcast txid on Hiro API.
+    // The wallet signs and broadcasts the tx directly (non-sponsored, pays its own fee).
+    // We verify the txid is in the mempool and matches the expected recipient + amount.
     const doSettle: SettleFunction = settleOverride ?? (async (payload, requirements) => {
-      const verifier = new X402PaymentVerifier(relayUrl)
-      return verifier.settle(payload, { paymentRequirements: requirements })
+      const txid = ((payload.payload as unknown) as Record<string, unknown>)?.txid as string | undefined
+      if (!txid) throw new Error('Missing txid in payment payload')
+
+      const hinapiBase = network === 'testnet'
+        ? 'https://api.testnet.hiro.so'
+        : 'https://api.hiro.so'
+
+      console.log(`[x402] Verifying txid ${txid} | token=${requirements.asset} amount=${requirements.amount} payTo=${requirements.payTo}`)
+
+      // Wait up to 10s for the tx to appear in the mempool
+      let tx: Record<string, unknown> | null = null
+      for (let attempt = 0; attempt < 5; attempt++) {
+        const res = await fetch(`${hinapiBase}/extended/v1/tx/${txid}`, {
+          signal: AbortSignal.timeout(10_000),
+        })
+        if (res.ok) {
+          tx = await res.json() as Record<string, unknown>
+          break
+        }
+        if (attempt < 4) await new Promise((r) => setTimeout(r, 2_000))
+      }
+
+      if (!tx) {
+        console.log(`[x402] Txid ${txid} not found in mempool after retries`)
+        return { success: false, errorReason: 'Transaction not found in mempool', transaction: '', network: requirements.network } as SettlementResponseV2
+      }
+
+      const txStatus = tx.tx_status as string
+      if (txStatus !== 'pending' && txStatus !== 'success') {
+        console.log(`[x402] Txid ${txid} has unexpected status: ${txStatus}`)
+        return { success: false, errorReason: `Transaction status: ${txStatus}`, transaction: '', network: requirements.network } as SettlementResponseV2
+      }
+
+      const tokenType = requirements.asset ?? 'STX'
+      const sender = tx.sender_address as string ?? ''
+
+      if (tokenType === 'STX') {
+        const transfer = tx.token_transfer as Record<string, unknown> | undefined
+        if (!transfer) return { success: false, errorReason: 'Not a STX transfer', transaction: '', network: requirements.network } as SettlementResponseV2
+        if (transfer.recipient_address !== requirements.payTo) {
+          console.log(`[x402] Wrong recipient: ${transfer.recipient_address} != ${requirements.payTo}`)
+          return { success: false, errorReason: 'Wrong payment recipient', transaction: '', network: requirements.network } as SettlementResponseV2
+        }
+        if (BigInt(transfer.amount as string ?? '0') < BigInt(requirements.amount)) {
+          console.log(`[x402] Insufficient amount: ${transfer.amount} < ${requirements.amount}`)
+          return { success: false, errorReason: 'Insufficient payment amount', transaction: '', network: requirements.network } as SettlementResponseV2
+        }
+      } else {
+        // SIP-010 token (sBTC, USDCx): verify via contract_call function args
+        // transfer(amount uint, sender principal, recipient principal, memo optional)
+        const call = tx.contract_call as Record<string, unknown> | undefined
+        const args = call?.function_args as Array<Record<string, unknown>> | undefined
+        if (!args || args.length < 3) return { success: false, errorReason: 'Not a SIP-010 transfer', transaction: '', network: requirements.network } as SettlementResponseV2
+        const recipientRepr = args[2]?.repr as string ?? ''
+        const recipientAddr = recipientRepr.startsWith("'") ? recipientRepr.slice(1) : recipientRepr
+        if (recipientAddr !== requirements.payTo) {
+          console.log(`[x402] Wrong token recipient: ${recipientAddr} != ${requirements.payTo}`)
+          return { success: false, errorReason: 'Wrong payment recipient', transaction: '', network: requirements.network } as SettlementResponseV2
+        }
+        const amountRepr = args[0]?.repr as string ?? '0'
+        const paidAmount = BigInt(amountRepr.replace(/^u/, ''))
+        if (paidAmount < BigInt(requirements.amount)) {
+          console.log(`[x402] Insufficient token amount: ${paidAmount} < ${requirements.amount}`)
+          return { success: false, errorReason: 'Insufficient payment amount', transaction: '', network: requirements.network } as SettlementResponseV2
+        }
+      }
+
+      console.log(`[x402] Payment verified: txid=${txid} sender=${sender}`)
+      return { success: true, payer: sender, transaction: txid, network: requirements.network } as SettlementResponseV2
     })
 
     let settlement: SettlementResponseV2
     try {
       settlement = await doSettle(paymentPayload, paymentPayload.accepted)
     } catch (err) {
-      console.error(`Relay error for server ${serverId}:`, err instanceof Error ? err.message : err)
+      console.error(`[x402] Relay error for server ${serverId}:`, err instanceof Error ? err.message : err)
       return c.json({ error: 'Relay unavailable', code: 'RELAY_UNAVAILABLE' }, 503)
     }
 

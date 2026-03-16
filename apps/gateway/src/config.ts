@@ -6,7 +6,7 @@ const ConfigSchema = z.object({
     .regex(/^[0-9a-fA-F]{64}$/, 'GATEWAY_ENCRYPTION_KEY must be 64 hex chars (32 bytes)'),
   REDIS_URL: z.string().url('REDIS_URL must be a valid URL'),
   RELAY_URL: z.string().url('RELAY_URL must be a valid URL'),
-  TESTNET_RELAY_URL: z.string().url().default('https://x402-relay.aibtc.dev/relay'),
+  TESTNET_RELAY_URL: z.string().url().default('https://x402-relay.aibtc.dev'),
   TOKEN_PRICE_STX: z.coerce.number().positive().default(3.0),
   TOKEN_PRICE_SBTC: z.coerce.number().positive().default(100_000.0),
   TOKEN_PRICE_USDCX: z.coerce.number().positive().default(1.0),

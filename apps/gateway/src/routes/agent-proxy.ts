@@ -126,14 +126,16 @@ agentProxyRouter.post('/:agentId', async (c) => {
       const caip2 = networkToCAIP2(network)
       const acceptedTokens = serverConfig.acceptedTokens ?? ['STX', 'sBTC', 'USDCx']
 
-      const accepts: PaymentRequirementsV2[] = acceptedTokens.map((token) => ({
-        scheme: 'exact',
-        network: caip2,
-        amount: usdToMicro(agentTool.price, token, tokenPrices[token]).toString(),
-        asset: token,
-        payTo: agent.ownerAddress, // Agent owner receives payment
-        maxTimeoutSeconds: 300,
-      }))
+      const accepts: PaymentRequirementsV2[] = acceptedTokens
+        .map((token) => ({
+          scheme: 'exact' as const,
+          network: caip2,
+          amount: usdToMicro(agentTool.price, token, tokenPrices[token]).toString(),
+          asset: token,
+          payTo: agent.ownerAddress, // Agent owner receives payment
+          maxTimeoutSeconds: 300,
+        }))
+        .filter((entry) => entry.amount !== '0')
 
       const paymentRequired: PaymentRequiredV2 = {
         x402Version: 2,
@@ -154,9 +156,47 @@ agentProxyRouter.post('/:agentId', async (c) => {
       return c.json({ error: 'Invalid payment-signature', code: 'INVALID_REQUEST' }, 400)
     }
 
+    if (!paymentPayload.accepted?.amount || paymentPayload.accepted.amount === '0') {
+      return c.json({ error: 'Payment amount is zero — choose a different token', code: 'AMOUNT_INSUFFICIENT' }, 402)
+    }
+
     const doSettle: SettleFunction = settleOverride ?? (async (payload, requirements) => {
-      const verifier = new X402PaymentVerifier(relayUrl)
-      return verifier.settle(payload, { paymentRequirements: requirements })
+      const txHex = payload.payload?.transaction
+      if (!txHex) throw new Error('Missing transaction in payment payload')
+
+      const relayBody = {
+        transaction: txHex,
+        settle: {
+          expectedRecipient: requirements.payTo,
+          minAmount: requirements.amount,
+          tokenType: requirements.asset ?? 'STX',
+        },
+      }
+
+      const res = await fetch(`${relayUrl}/relay`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(relayBody),
+        signal: AbortSignal.timeout(30_000),
+      })
+
+      const result = await res.json() as Record<string, unknown>
+
+      if (!res.ok || result.error) {
+        return {
+          success: false,
+          errorReason: (result.error as string) ?? `relay_error_${res.status}`,
+          transaction: '',
+          network: requirements.network,
+        } as SettlementResponseV2
+      }
+
+      return {
+        success: true,
+        payer: result.sender as string ?? '',
+        transaction: result.txid as string ?? '',
+        network: requirements.network,
+      } as SettlementResponseV2
     })
 
     let settlement: SettlementResponseV2

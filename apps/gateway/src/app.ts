@@ -75,8 +75,8 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     return c.json({ error: 'id query parameter is required', code: 'INVALID_REQUEST' }, 400)
   })
 
-  app.route('/api/v1/servers', serversRouter)
   app.route('/api/v1/servers', analyticsRouter)
+  app.route('/api/v1/servers', serversRouter)
   app.route('/api/v1/admin', adminRouter)
   app.route('/api/v1/proxy', proxyRouter)
   app.route('/api/v1/agents', agentsRouter)

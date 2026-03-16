@@ -13,8 +13,9 @@ import {
   fetchCallReadOnlyFunction,
   standardPrincipalCV,
   cvToJSON,
+  publicKeyToAddress,
 } from '@stacks/transactions'
-import { STACKS_MAINNET } from '@stacks/network'
+import { STACKS_MAINNET, STACKS_TESTNET } from '@stacks/network'
 
 export interface WalletBalances {
   stx: string
@@ -30,6 +31,7 @@ export interface SignMessageResult {
 export interface X402WalletState {
   address: string | null
   publicKey: string | null
+  network: 'mainnet' | 'testnet'
   isConnected: boolean
   isConnecting: boolean
   isWalletInstalled: boolean
@@ -39,20 +41,59 @@ export interface X402WalletState {
   disconnectWallet: () => void
   refreshBalances: () => Promise<void>
   signMessage: (message: string) => Promise<SignMessageResult>
+  /** Returns the verified signing public key, prompting the wallet if not yet stored. */
+  getSigningPublicKey: () => Promise<string>
 }
 
 export const X402WalletContext = createContext<X402WalletState | null>(null)
 
-const SBTC_CONTRACT_ADDRESS = 'SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4'
-const SBTC_CONTRACT_NAME = 'sbtc-token'
-const USDCX_CONTRACT_ADDRESS = 'SP120SBRBQJ00MCWS7TM5R8WJNTTKD5K0HFRC2CNE'
-const USDCX_CONTRACT_NAME = 'usdcx'
+// ── Contract addresses per network ──────────────────────────────────────────
 
-async function fetchStxBalance(address: string): Promise<string> {
-  const res = await fetch(`https://api.hiro.so/v2/accounts/${address}`)
+const CONTRACTS = {
+  mainnet: {
+    sbtc: { address: 'SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4', name: 'sbtc-token' },
+    usdcx: { address: 'SP120SBRBQJ00MCWS7TM5R8WJNTTKD5K0HFRC2CNE', name: 'usdcx' },
+  },
+  testnet: {
+    sbtc: { address: 'ST1F7QA2MDF17S807EPA36TSS8AMEFY4KA9TVGWXT', name: 'sbtc-token' },
+    usdcx: { address: 'ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM', name: 'usdcx-v1' },
+  },
+} as const
+
+const HIRO_API = {
+  mainnet: 'https://api.hiro.so',
+  testnet: 'https://api.testnet.hiro.so',
+} as const
+
+// ── Detect network from Stacks address prefix ──────────────────────────────
+
+function detectNetwork(address: string): 'mainnet' | 'testnet' {
+  if (address.startsWith('SP') || address.startsWith('SM')) return 'mainnet'
+  return 'testnet'
+}
+
+// ── Verify a public key actually derives to the given Stacks address ─────────
+// Uses publicKeyToAddress from @stacks/transactions (official SDK function).
+// This ensures the key we stored matches the wallet's actual signing key.
+
+function verifyPublicKeyMatchesAddress(pubKey: string, address: string): boolean {
+  try {
+    const net = detectNetwork(address)
+    // publicKeyToAddress(publicKey, network) — public key is first arg
+    const derived = publicKeyToAddress(pubKey, net)
+    return derived === address
+  } catch {
+    return false
+  }
+}
+
+// ── Balance fetchers ────────────────────────────────────────────────────────
+
+async function fetchStxBalance(address: string, network: 'mainnet' | 'testnet'): Promise<string> {
+  const baseUrl = HIRO_API[network]
+  const res = await fetch(`${baseUrl}/v2/accounts/${address}`)
   if (!res.ok) throw new Error(`Hiro API error: ${res.status}`)
   const data = await res.json()
-  // balance includes locked (stacked) STX — subtract to get spendable
   const totalMicroStx = BigInt(data.balance)
   const lockedMicroStx = BigInt(data.locked || '0')
   const availableMicroStx = totalMicroStx - lockedMicroStx
@@ -64,22 +105,27 @@ async function fetchTokenBalance(
   contractAddress: string,
   contractName: string,
   ownerAddress: string,
+  network: 'mainnet' | 'testnet',
 ): Promise<string> {
+  const stacksNetwork = network === 'mainnet' ? STACKS_MAINNET : STACKS_TESTNET
   const result = await fetchCallReadOnlyFunction({
     contractAddress,
     contractName,
     functionName: 'get-balance',
     functionArgs: [standardPrincipalCV(ownerAddress)],
     senderAddress: ownerAddress,
-    network: STACKS_MAINNET,
+    network: stacksNetwork,
   })
   const json = cvToJSON(result)
-  // SIP-010 get-balance returns (response uint uint)
   const rawValue = json.value?.value ?? json.value ?? '0'
   return rawValue.toString()
 }
 
+// ── Storage keys ─────────────────────────────────────────────────────────────
+// Store address + public key together so we can re-validate on restore.
+
 const PK_STORAGE_KEY = 'x402:publicKey'
+const ADDR_STORAGE_KEY = 'x402:address'
 
 export function X402WalletProvider({ children }: { children: React.ReactNode }) {
   const [address, setAddress] = useState<string | null>(null)
@@ -88,12 +134,14 @@ export function X402WalletProvider({ children }: { children: React.ReactNode }) 
   const [balances, setBalances] = useState<WalletBalances | null>(null)
   const [balancesLoading, setBalancesLoading] = useState(false)
 
+  const network = useMemo(() => (address ? detectNetwork(address) : 'mainnet'), [address])
+
   const checkWalletInstalled = useCallback(() => {
     if (typeof window === 'undefined') return false
     return isStacksWalletInstalled()
   }, [])
 
-  // Poll for connection changes (same pattern as existing useWalletAuth)
+  // ── Restore session on mount ───────────────────────────────────────────────
   useEffect(() => {
     const checkConnection = () => {
       const connected = stacksIsConnected()
@@ -102,15 +150,23 @@ export function X402WalletProvider({ children }: { children: React.ReactNode }) 
         const stxAddress = userData?.addresses?.stx?.[0]?.address ?? null
         if (stxAddress && stxAddress !== address) {
           setAddress(stxAddress)
-          // Restore publicKey from our own storage (@stacks/connect strips it)
+          // Restore the public key we verified at connect time.
+          // Only restore if the stored key+address pair still matches.
           const storedPk = localStorage.getItem(PK_STORAGE_KEY)
-          if (storedPk) {
+          const storedAddr = localStorage.getItem(ADDR_STORAGE_KEY)
+          if (storedPk && storedAddr === stxAddress && verifyPublicKeyMatchesAddress(storedPk, stxAddress)) {
             setPublicKey(storedPk)
+          } else {
+            // Stale or mismatched — clear so the user re-verifies on next payment
+            localStorage.removeItem(PK_STORAGE_KEY)
+            localStorage.removeItem(ADDR_STORAGE_KEY)
+            setPublicKey(null)
           }
         }
       } else if (address !== null) {
         setAddress(null)
         setBalances(null)
+        setPublicKey(null)
       }
     }
 
@@ -122,11 +178,13 @@ export function X402WalletProvider({ children }: { children: React.ReactNode }) 
   const refreshBalances = useCallback(async () => {
     if (!address) return
     setBalancesLoading(true)
+    const net = detectNetwork(address)
+    const contracts = CONTRACTS[net]
     try {
       const [stx, sbtcRaw, usdcxRaw] = await Promise.allSettled([
-        fetchStxBalance(address),
-        fetchTokenBalance(SBTC_CONTRACT_ADDRESS, SBTC_CONTRACT_NAME, address),
-        fetchTokenBalance(USDCX_CONTRACT_ADDRESS, USDCX_CONTRACT_NAME, address),
+        fetchStxBalance(address, net),
+        fetchTokenBalance(contracts.sbtc.address, contracts.sbtc.name, address, net),
+        fetchTokenBalance(contracts.usdcx.address, contracts.usdcx.name, address, net),
       ])
 
       setBalances({
@@ -147,30 +205,25 @@ export function X402WalletProvider({ children }: { children: React.ReactNode }) 
     }
   }, [address])
 
-  // Fetch balances when address changes
   useEffect(() => {
-    if (address) {
-      refreshBalances()
-    }
+    if (address) refreshBalances()
   }, [address, refreshBalances])
+
+  // ── Connect wallet ─────────────────────────────────────────────────────────
+  // After connecting, we sign a small verification message.
+  // stx_signMessage always returns the publicKey for the current account's
+  // signing key — this is the ONLY reliable source for the key used in
+  // stx_signTransaction. We verify it with publicKeyToAddress before storing.
 
   const connectWallet = useCallback(async () => {
     setIsConnecting(true)
     try {
       const response = await stacksConnect()
-      // Filter by STX symbol — connect() returns both STX and BTC addresses
-      const stxEntry = response.addresses.find(
-        (a) => a.symbol?.toUpperCase() === 'STX',
-      )
+      const stxEntry = response.addresses.find((a) => a.symbol?.toUpperCase() === 'STX')
       const stxAddress = stxEntry?.address ?? response.addresses[0]?.address
-      const stxPubKey = stxEntry?.publicKey ?? response.addresses[0]?.publicKey ?? null
-      if (stxAddress) {
-        setAddress(stxAddress)
-        setPublicKey(stxPubKey)
-        if (stxPubKey) {
-          localStorage.setItem(PK_STORAGE_KEY, stxPubKey)
-        }
-      }
+      if (!stxAddress) throw new Error('No STX address returned from wallet')
+      setAddress(stxAddress)
+      // publicKey is fetched on-demand via signMessage (see getSigningPublicKey below)
     } catch (err) {
       console.error('Wallet connection failed:', err)
     } finally {
@@ -178,14 +231,43 @@ export function X402WalletProvider({ children }: { children: React.ReactNode }) 
     }
   }, [])
 
-  const signMessage = useCallback(async (message: string): Promise<SignMessageResult> => {
+  const signMessage = useCallback(
+    async (message: string): Promise<SignMessageResult> => {
+      if (!address) throw new Error('Wallet not connected')
+      const result = await request('stx_signMessage', { message })
+      // stx_signMessage always returns the key for the current account — store it
+      if (result.publicKey) {
+        const pk = result.publicKey
+        if (verifyPublicKeyMatchesAddress(pk, address)) {
+          setPublicKey(pk)
+          localStorage.setItem(PK_STORAGE_KEY, pk)
+          localStorage.setItem(ADDR_STORAGE_KEY, address)
+          console.log('[x402] Stored verified publicKey from signMessage')
+        } else {
+          console.warn('[x402] signMessage publicKey does not match address — not stored')
+          console.log('[x402] publicKey:', pk)
+          console.log('[x402] address:', address)
+          console.log('[x402] derived:', publicKeyToAddress(pk, detectNetwork(address)))
+        }
+      }
+      return {
+        signature: result.signature,
+        publicKey: result.publicKey ?? publicKey ?? '',
+      }
+    },
+    [address, publicKey],
+  )
+
+  // Returns verified signing publicKey. If not cached, prompts wallet via stx_signMessage.
+  // Used by payment flows to guarantee the key matches what stx_signTransaction will use.
+  const getSigningPublicKey = useCallback(async (): Promise<string> => {
     if (!address) throw new Error('Wallet not connected')
-    const result = await request('stx_signMessage', { message })
-    return {
-      signature: result.signature,
-      publicKey: result.publicKey ?? publicKey ?? '',
-    }
-  }, [address, publicKey])
+    if (publicKey) return publicKey
+    // Not cached — get it now via sign message
+    const result = await signMessage(`StackAI x402: authorize ${address}`)
+    if (!result.publicKey) throw new Error('Wallet did not return a public key')
+    return result.publicKey
+  }, [address, publicKey, signMessage])
 
   const disconnectWallet = useCallback(() => {
     stacksDisconnect()
@@ -193,12 +275,14 @@ export function X402WalletProvider({ children }: { children: React.ReactNode }) 
     setPublicKey(null)
     setBalances(null)
     localStorage.removeItem(PK_STORAGE_KEY)
+    localStorage.removeItem(ADDR_STORAGE_KEY)
   }, [])
 
   const value = useMemo<X402WalletState>(
     () => ({
       address,
       publicKey,
+      network,
       isConnected: !!address,
       isConnecting,
       isWalletInstalled: checkWalletInstalled(),
@@ -208,10 +292,12 @@ export function X402WalletProvider({ children }: { children: React.ReactNode }) 
       disconnectWallet,
       refreshBalances,
       signMessage,
+      getSigningPublicKey,
     }),
     [
       address,
       publicKey,
+      network,
       isConnecting,
       checkWalletInstalled,
       balances,
@@ -220,10 +306,9 @@ export function X402WalletProvider({ children }: { children: React.ReactNode }) 
       disconnectWallet,
       refreshBalances,
       signMessage,
+      getSigningPublicKey,
     ],
   )
 
-  return (
-    <X402WalletContext.Provider value={value}>{children}</X402WalletContext.Provider>
-  )
+  return <X402WalletContext.Provider value={value}>{children}</X402WalletContext.Provider>
 }

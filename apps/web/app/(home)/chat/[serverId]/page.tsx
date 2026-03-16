@@ -13,7 +13,7 @@ import {
   type PaymentStatus,
 } from '@/components/x402/PaymentCard'
 import { useX402Wallet } from '@/hooks/use-x402-wallet'
-import { buildUnsignedPaymentTx } from '@/lib/x402/build-payment-tx'
+import { buildUnsignedPaymentTx, broadcastSignedTx } from '@/lib/x402/build-payment-tx'
 import type { AgentConfig } from '@/components/x402/AgentComposer'
 
 interface PaymentStatusEntry {
@@ -108,7 +108,7 @@ function ChatPageInner() {
       },
       tokenType: string,
     ) => {
-      if (!wallet.address || !wallet.publicKey) {
+      if (!wallet.address) {
         setPaymentStatuses((prev) => ({
           ...prev,
           [toolCallId]: { status: 'error', error: 'Wallet not connected' },
@@ -133,11 +133,23 @@ function ChatPageInner() {
       }))
 
       try {
-        // Build unsigned sponsored tx (fee=0, relay pays gas)
+        // Get the verified signing public key (prompts wallet via stx_signMessage if not cached).
+        let signingKey: string
+        try {
+          signingKey = await wallet.getSigningPublicKey()
+        } catch {
+          setPaymentStatuses((prev) => ({
+            ...prev,
+            [toolCallId]: { status: 'error', error: 'Wallet verification cancelled' },
+          }))
+          return
+        }
+
+        // Build unsigned tx with auto fee estimation
         let unsignedHex: string
         try {
           unsignedHex = await buildUnsignedPaymentTx({
-            publicKey: wallet.publicKey,
+            publicKey: signingKey,
             senderAddress: wallet.address,
             recipient: selectedAccept.payTo,
             amount: selectedAccept.amount,
@@ -155,8 +167,7 @@ function ChatPageInner() {
           return
         }
 
-        // Sign with wallet (no broadcast — relay handles that)
-        // AC4/FR28: wallet cancel → no charge, no broadcast
+        // Wallet signs (broadcast: false) — we broadcast ourselves to get a real txid
         let signedHex: string
         try {
           const signResult = await request('stx_signTransaction', {
@@ -172,13 +183,28 @@ function ChatPageInner() {
           return
         }
 
+        // Broadcast to Stacks network via Hiro API to get the real txid
+        let txid: string
+        try {
+          txid = await broadcastSignedTx(signedHex, selectedAccept.network)
+        } catch (broadcastErr) {
+          setPaymentStatuses((prev) => ({
+            ...prev,
+            [toolCallId]: {
+              status: 'error',
+              error: broadcastErr instanceof Error ? broadcastErr.message : 'Broadcast failed',
+            },
+          }))
+          return
+        }
+
         setPaymentStatuses((prev) => ({
           ...prev,
           [toolCallId]: { status: 'approved' },
         }))
 
-        // Build V2 payment-signature: base64(JSON(PaymentPayloadV2))
-        const payloadV2 = { x402Version: 2, accepted: selectedAccept, payload: { transaction: signedHex } }
+        // Build V2 payment-signature with the real txid — gateway verifies via Hiro API
+        const payloadV2 = { x402Version: 2, accepted: selectedAccept, payload: { txid } }
         const paymentSignature = btoa(JSON.stringify(payloadV2))
 
         // Send payment-signature to gateway via our pay API route

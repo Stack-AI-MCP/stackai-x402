@@ -10,7 +10,7 @@ import {
 import { Copy, Check, Loader2, RefreshCw, Wallet } from 'lucide-react'
 import { cn } from '@/lib/utils/format'
 import { PaymentCard, type PaymentRequirement, type PaymentStatus } from './PaymentCard'
-import { buildUnsignedPaymentTx } from '@/lib/x402/build-payment-tx'
+import { buildUnsignedPaymentTx, broadcastSignedTx } from '@/lib/x402/build-payment-tx'
 import { useX402Wallet } from '@/hooks/use-x402-wallet'
 import { request } from '@stacks/connect'
 
@@ -18,10 +18,11 @@ const GATEWAY_URL = process.env.NEXT_PUBLIC_GATEWAY_URL ?? 'http://localhost:300
 
 /**
  * Build a V2 PaymentPayloadV2 and base64-encode it for the payment-signature header.
- * Format: base64(JSON({ x402Version: 2, accepted: PaymentRequirementsV2, payload: { transaction: txHex } }))
+ * Format: base64(JSON({ x402Version: 2, accepted: PaymentRequirementsV2, payload: { txid } }))
+ * txid is the broadcast transaction ID — gateway verifies it on-chain via Hiro API.
  */
-function buildPaymentSignature(accepted: import('./PaymentCard').PaymentAccept, txHex: string): string {
-  const payload = { x402Version: 2, accepted, payload: { transaction: txHex } }
+function buildPaymentSignature(accepted: import('./PaymentCard').PaymentAccept, txid: string): string {
+  const payload = { x402Version: 2, accepted, payload: { txid } }
   return btoa(JSON.stringify(payload))
 }
 
@@ -315,7 +316,7 @@ function ResultPanel({ result }: { result: unknown }) {
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export function ToolRunnerModal({ open, onOpenChange, serverId, tool }: ToolRunnerModalProps) {
-  const { address, publicKey, isConnected, connectWallet, isConnecting } = useX402Wallet()
+  const { address, publicKey, isConnected, connectWallet, isConnecting, getSigningPublicKey } = useX402Wallet()
 
   const [args, setArgs] = useState<Record<string, unknown>>({})
   const [loading, setLoading] = useState(false)
@@ -424,7 +425,7 @@ export function ToolRunnerModal({ open, onOpenChange, serverId, tool }: ToolRunn
   // ─── Handle wallet payment approval ──────────────────────────────────────
 
   const handlePaymentApprove = async (tokenType: string) => {
-    if (!payment || !pendingArgs || !address || !publicKey) return
+    if (!payment || !pendingArgs || !address) return
     setPaymentStatus('signing')
     setPaymentError(undefined)
     setPaymentErrorCode(undefined)
@@ -434,9 +435,14 @@ export function ToolRunnerModal({ open, onOpenChange, serverId, tool }: ToolRunn
       const selectedAccept = payment.accepts.find((a) => a.asset === tokenType) ?? payment.accepts[0]
       if (!selectedAccept) throw new Error(`No payment option found for token ${tokenType}`)
 
-      // 2. Build unsigned sponsored transaction
+      // 2. Get the verified signing public key.
+      //    If not cached, wallet will prompt to sign a short message (once per session).
+      //    stx_signMessage returns the exact key that stx_signTransaction uses.
+      const signingKey = await getSigningPublicKey()
+
+      // 3. Build unsigned transaction (relay sponsors + broadcasts)
       const unsignedHex = await buildUnsignedPaymentTx({
-        publicKey,
+        publicKey: signingKey,
         senderAddress: address,
         recipient: selectedAccept.payTo,
         amount: selectedAccept.amount,
@@ -444,17 +450,20 @@ export function ToolRunnerModal({ open, onOpenChange, serverId, tool }: ToolRunn
         network: selectedAccept.network,
       })
 
-      // 3. Prompt wallet to sign (broadcast: false — relay handles broadcast)
+      // 4. Wallet signs (broadcast: false) — we broadcast to get a real txid
       const signResult = await request('stx_signTransaction', {
         transaction: unsignedHex,
         broadcast: false,
       })
+      const signedHex = (signResult as { transaction: string }).transaction
+
+      // 5. Broadcast to Stacks network via Hiro API
+      const txid = await broadcastSignedTx(signedHex, selectedAccept.network)
 
       setPaymentStatus('approved')
 
-      // 4. Build V2 payment-signature: base64(JSON(PaymentPayloadV2))
-      const signedHex: string = (signResult as { transaction?: string }).transaction ?? unsignedHex
-      const paymentSig = buildPaymentSignature(selectedAccept, signedHex)
+      // 6. Build V2 payment-signature with the real txid — gateway verifies on Hiro API
+      const paymentSig = buildPaymentSignature(selectedAccept, txid)
 
       // 5. Retry tool call with V2 payment-signature (no payment-id)
       const { status, data, headers } = await callTool(pendingArgs, {

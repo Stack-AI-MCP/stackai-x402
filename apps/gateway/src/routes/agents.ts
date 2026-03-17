@@ -116,7 +116,7 @@ agentsRouter.post('/', async (c) => {
 
     // Bridge to moltbook service via Redis queue (API key passes through, not stored in gateway)
     if (parsed.data.moltbookApiKey && agentInput.moltbookName) {
-      await redis.lpush('moltbook:agent-registrations', JSON.stringify({
+      await (redis as any).lpush('moltbook:agent-registrations', JSON.stringify({ // eslint-disable-line @typescript-eslint/no-explicit-any
         gatewayAgentId: agent.agentId,
         moltbookApiKey: parsed.data.moltbookApiKey,
         moltbookName: agentInput.moltbookName,

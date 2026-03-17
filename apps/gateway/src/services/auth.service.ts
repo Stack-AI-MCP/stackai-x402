@@ -18,6 +18,52 @@ export interface SignedMessage {
 /** Maximum age of a signed message before it's considered expired (5 minutes). */
 const MAX_MESSAGE_AGE_MS = 5 * 60 * 1000
 
+/** Prefix used by Stacks wallets (Leather/Xverse) for stx_signMessage. */
+const STACKS_MESSAGE_PREFIX = 'Stacks Signed Message:\n'
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/** Encode an integer as a Bitcoin-style variable-length integer. */
+function varintBytes(n: number): Buffer {
+  if (n < 0xfd) return Buffer.from([n])
+  if (n <= 0xffff) {
+    const buf = Buffer.alloc(3)
+    buf[0] = 0xfd
+    buf.writeUInt16LE(n, 1)
+    return buf
+  }
+  const buf = Buffer.alloc(5)
+  buf[0] = 0xfe
+  buf.writeUInt32LE(n, 1)
+  return buf
+}
+
+/**
+ * Hash a message the same way Stacks wallets do for `stx_signMessage`:
+ * SHA-256( varint(prefix.length) + prefix + varint(message.length) + message )
+ *
+ * This is the Bitcoin-style message hashing with "Stacks Signed Message:\n" prefix.
+ */
+function walletMessageHash(message: string): string {
+  const prefixBuf = Buffer.from(STACKS_MESSAGE_PREFIX, 'utf8')
+  const msgBuf = Buffer.from(message, 'utf8')
+  const full = Buffer.concat([
+    varintBytes(prefixBuf.length),
+    prefixBuf,
+    varintBytes(msgBuf.length),
+    msgBuf,
+  ])
+  return createHash('sha256').update(full).digest('hex')
+}
+
+/**
+ * Hash a message the way the SDK does for `signMessageHashRsv`:
+ * plain SHA-256 of the raw message string.
+ */
+function sdkMessageHash(message: string): string {
+  return createHash('sha256').update(message).digest('hex')
+}
+
 // ─── Verification ─────────────────────────────────────────────────────────────
 
 /**
@@ -26,12 +72,12 @@ const MAX_MESSAGE_AGE_MS = 5 * 60 * 1000
  * 2. The public key derives to the expected Stacks address.
  * 3. The message timestamp is within the allowed window (replay protection).
  *
- * The SDK signs messages by SHA-256 hashing the raw string and calling
- * `signMessageHashRsv({ messageHash, privateKey })`. We verify the same way:
- * hash the message with SHA-256 and pass the hash to `verifyMessageSignatureRsv`.
+ * Supports two signing schemes:
+ * - **Wallet signing** (`stx_signMessage`): uses Bitcoin-style prefix hashing
+ *   SHA-256( varint(prefixLen) + "Stacks Signed Message:\n" + varint(msgLen) + msg )
+ * - **SDK signing** (`signMessageHashRsv`): plain SHA-256(message)
  *
- * For browser wallet signing (`stx_signMessage`), the wallet also SHA-256 hashes
- * the message string internally, so both paths produce compatible signatures.
+ * We try the wallet format first, then fall back to SDK format.
  */
 export function verifyMessageSignature(
   signed: SignedMessage,
@@ -52,7 +98,6 @@ export function verifyMessageSignature(
   }
 
   // ── Derive address from public key ───────────────────────────────────
-  // Stacks addresses: SP = mainnet (AddressVersion 22), ST = testnet (AddressVersion 26)
   const isMainnet = expectedAddress.startsWith('SP')
   const version = isMainnet
     ? AddressVersion.MainnetSingleSig
@@ -62,16 +107,18 @@ export function verifyMessageSignature(
   if (derivedAddress !== expectedAddress) return false
 
   // ── Verify signature ─────────────────────────────────────────────────
-  // SDK signs with: signMessageHashRsv({ messageHash: sha256(message), privateKey })
-  // So we must verify against the same SHA-256 hash of the raw message string.
-  const messageHash = createHash('sha256').update(message).digest('hex')
+  // RSV format: r (64 hex) + s (64 hex) + v (2 hex) = 130 chars
+  // verifySignature expects just r + s (first 128 hex chars)
+  const rs = signature.length === 130 ? signature.slice(0, 128) : signature
+
+  // Try wallet-style hash first (browser wallets), then SDK-style (programmatic)
+  try {
+    if (verifySignature(rs, walletMessageHash(message), publicKey)) return true
+  } catch { /* fall through */ }
 
   try {
-    // signMessageHashRsv returns RSV format: r (64 hex) + s (64 hex) + v (2 hex)
-    // verifySignature expects just r + s (first 128 hex chars)
-    const rs = signature.length === 130 ? signature.slice(0, 128) : signature
-    return verifySignature(rs, messageHash, publicKey)
-  } catch {
-    return false
-  }
+    if (verifySignature(rs, sdkMessageHash(message), publicKey)) return true
+  } catch { /* fall through */ }
+
+  return false
 }

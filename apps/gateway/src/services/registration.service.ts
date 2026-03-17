@@ -174,7 +174,7 @@ export async function registerServer(
   // Store Moltbook API key for standalone moltbook service to pick up
   if (input.createMoltbookAgent && input.moltbookApiKey) {
     await redis.set(`server:${serverId}:moltbookApiKey`, input.moltbookApiKey, ...TTL)
-    await redis.lpush('moltbook:pending-registrations', JSON.stringify({
+    await (redis as any).lpush('moltbook:pending-registrations', JSON.stringify({ // eslint-disable-line @typescript-eslint/no-explicit-any
       serverId,
       name: input.name,
       description: input.description ?? '',

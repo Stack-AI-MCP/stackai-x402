@@ -47,10 +47,21 @@ const SERVER_CONFIG = {
 }
 
 function makeRedis(configJson: string | null = JSON.stringify(SERVER_CONFIG)) {
-  return {
+  const mock = {
     get: vi.fn().mockResolvedValue(configJson),
     publish: vi.fn().mockResolvedValue(1),
+    subscribe: vi.fn().mockResolvedValue(undefined),
+    on: vi.fn(),
+    quit: vi.fn().mockResolvedValue(undefined),
+    duplicate: vi.fn() as any,
   } as any
+  // duplicate() returns a new mock with the same shape
+  mock.duplicate.mockReturnValue({
+    subscribe: vi.fn().mockResolvedValue(undefined),
+    on: vi.fn(),
+    quit: vi.fn().mockResolvedValue(undefined),
+  })
+  return mock
 }
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
@@ -99,8 +110,14 @@ describe('notification.worker', () => {
     expect(message).toContain('0xdeadbeef')
   })
 
-  it('skips Telegram when telegramChatId is not configured (AC5)', async () => {
-    redis = makeRedis(JSON.stringify({ webhookUrl: 'https://hooks.example.com/notify' }))
+  it('skips Telegram when telegramChatId is not configured and no user-level binding (AC5)', async () => {
+    // No telegramChatId in server config, and redis.get returns null for tg: keys
+    redis = makeRedis(null)
+    redis.get.mockImplementation(async (key: string) => {
+      if (key.startsWith('server:') && key.endsWith(':config'))
+        return JSON.stringify({ webhookUrl: 'https://hooks.example.com/notify' })
+      return null // no tg: binding, no ownerAddress
+    })
     createNotificationWorker({ redis, pubRedis, telegramBotToken: 'bot-token' })
 
     await capturedProcessor!({ data: SAMPLE_DATA })

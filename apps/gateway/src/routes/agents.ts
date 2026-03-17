@@ -26,7 +26,7 @@ const CreateAgentSchema = z.object({
   tools: z.array(AgentToolSchema).min(1, 'at least one tool is required'),
   moltbookName: z.string().optional(),
   moltbookApiKey: z.string().startsWith('moltbook_').optional(),
-  heartbeatIntervalHours: z.number().min(1).max(24).optional(),
+  heartbeatIntervalHours: z.number().min(0.01).max(24).optional(),
   systemPrompt: z.string().optional(),
   starterPrompts: z.array(z.string()).optional(),
   network: z.enum(['mainnet', 'testnet']).default('mainnet'),
@@ -43,6 +43,7 @@ const UpdateAgentSchema = z.object({
   moltbookName: z.string().optional(),
   systemPrompt: z.string().optional(),
   starterPrompts: z.array(z.string()).optional(),
+  heartbeatIntervalHours: z.number().min(0.01).max(24).optional(),
   // Auth
   signature: z.string().optional(),
   publicKey: z.string().optional(),

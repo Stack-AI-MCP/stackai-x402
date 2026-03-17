@@ -391,19 +391,29 @@ export function CreateAgentWizard({ open, onOpenChange, onCreated }: CreateAgent
                       Heartbeat Interval
                     </label>
                     <div className="flex gap-2 flex-wrap">
-                      {[1, 4, 6, 8, 12, 24].map((h) => (
+                      {[
+                        { label: '2m', value: 2 / 60, warn: true },
+                        { label: '5m', value: 5 / 60, warn: true },
+                        { label: '15m', value: 0.25 },
+                        { label: '1h', value: 1 },
+                        { label: '4h', value: 4 },
+                        { label: '6h', value: 6 },
+                        { label: '12h', value: 12 },
+                        { label: '24h', value: 24 },
+                      ].map((opt) => (
                         <button
-                          key={h}
+                          key={opt.label}
                           type="button"
-                          onClick={() => setHeartbeatInterval(h)}
+                          onClick={() => setHeartbeatInterval(opt.value)}
                           className={cn(
                             'h-9 px-3 text-[11px] font-mono font-bold border rounded-lg transition-colors',
-                            heartbeatInterval === h
+                            heartbeatInterval === opt.value
                               ? 'border-foreground bg-foreground text-background'
                               : 'border-border text-muted-foreground hover:border-foreground',
+                            opt.warn && 'text-amber-500',
                           )}
                         >
-                          {h}h
+                          {opt.label}
                         </button>
                       ))}
                     </div>
@@ -508,7 +518,7 @@ export function CreateAgentWizard({ open, onOpenChange, onCreated }: CreateAgent
                     </div>
                     <div className="flex justify-between">
                       <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-muted-foreground">HEARTBEAT</span>
-                      <span className="text-sm font-mono">Every {heartbeatInterval}h</span>
+                      <span className="text-sm font-mono">Every {heartbeatInterval >= 1 ? `${heartbeatInterval}h` : `${Math.round(heartbeatInterval * 60)}m`}</span>
                     </div>
                     {notifyTelegram && (
                       <div className="flex justify-between">

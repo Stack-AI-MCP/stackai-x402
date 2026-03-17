@@ -19,6 +19,7 @@ export interface AgentConfig {
   tools: AgentTool[]
   systemPrompt?: string
   starterPrompts?: string[]
+  heartbeatIntervalHours?: number
   network: 'mainnet' | 'testnet'
   createdAt: string
   updatedAt: string
@@ -32,6 +33,7 @@ export interface CreateAgentInput {
   moltbookName?: string
   systemPrompt?: string
   starterPrompts?: string[]
+  heartbeatIntervalHours?: number
   network?: 'mainnet' | 'testnet'
 }
 
@@ -96,6 +98,7 @@ export async function createAgent(
     ...(input.moltbookName && { moltbookName: input.moltbookName }),
     ...(input.systemPrompt && { systemPrompt: input.systemPrompt }),
     ...(input.starterPrompts?.length && { starterPrompts: input.starterPrompts }),
+    ...(input.heartbeatIntervalHours && { heartbeatIntervalHours: input.heartbeatIntervalHours }),
   }
 
   await Promise.all([
@@ -156,7 +159,7 @@ export async function listAgents(
 
 export async function updateAgent(
   agentId: string,
-  updates: Partial<Pick<AgentConfig, 'name' | 'description' | 'tools' | 'moltbookName' | 'moltbookAgentId' | 'systemPrompt' | 'starterPrompts'>>,
+  updates: Partial<Pick<AgentConfig, 'name' | 'description' | 'tools' | 'moltbookName' | 'moltbookAgentId' | 'systemPrompt' | 'starterPrompts' | 'heartbeatIntervalHours'>>,
   deps: { redis: RedisLike },
 ): Promise<AgentConfig | null> {
   const existing = await getAgent(agentId, deps)

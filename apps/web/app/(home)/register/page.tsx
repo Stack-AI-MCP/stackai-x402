@@ -7,6 +7,7 @@ import { cn } from '@/lib/utils/format'
 import { HighlighterText } from '@/components/landing/HighlighterText'
 import { ServerRegisterForm } from '@/components/x402/ServerRegisterForm'
 import { MonetizeWizard, type MCPToolLite } from '@/components/x402/MonetizeWizard'
+import { TelegramConnect } from '@/components/x402/TelegramConnect'
 import { useX402Wallet } from '@/hooks/use-x402-wallet'
 
 const GATEWAY_URL = process.env.NEXT_PUBLIC_GATEWAY_URL ?? 'http://localhost:3001'
@@ -205,6 +206,9 @@ export default function RegisterPage() {
             </button>
           </div>
         </div>
+
+        {/* Telegram notification opt-in */}
+        {address && <TelegramConnect walletAddress={address} />}
       </div>
     )
   }

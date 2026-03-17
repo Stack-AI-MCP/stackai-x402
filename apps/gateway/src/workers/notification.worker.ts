@@ -6,6 +6,17 @@ import type {
   ErrorRateAlertPayload,
 } from '../services/notification.service.js'
 
+// ─── Moltbook activity types ──────────────────────────────────────────────────
+
+interface MoltbookActivityPayload {
+  gatewayAgentId: string
+  ownerAddress?: string
+  agentName: string
+  action: 'posted' | 'commented'
+  detail: string
+  timestamp: number
+}
+
 // ─── Message formatting ──────────────────────────────────────────────────────
 
 function formatTelegramMessage(data: PaymentNotificationPayload): string {
@@ -15,6 +26,15 @@ function formatTelegramMessage(data: PaymentNotificationPayload): string {
     `Amount: ${data.amount} ${data.token}`,
     `From: ${data.fromAddress}`,
     `Tx: ${data.txid}`,
+  ].join('\n')
+}
+
+function formatMoltbookActivity(data: MoltbookActivityPayload): string {
+  const verb = data.action === 'posted' ? 'posted' : 'commented on'
+  return [
+    `Your agent @${data.agentName} just ${verb}:`,
+    `"${data.detail}"`,
+    `https://www.moltbook.com/u/${data.agentName}`,
   ].join('\n')
 }
 
@@ -77,9 +97,17 @@ async function handleErrorRateAlert(
   }
 
   // ── Telegram alert ────────────────────────────────────────────────
-  if (telegramApi && config.telegramChatId) {
+  let alertChatId = config.telegramChatId
+  if (!alertChatId) {
+    const ownerAddress = await redis.get(`server:${data.serverId}:ownerAddress`)
+    if (ownerAddress) {
+      alertChatId = (await redis.get(`tg:${ownerAddress}`)) ?? undefined
+    }
+  }
+
+  if (telegramApi && alertChatId) {
     await telegramApi.sendMessage(
-      config.telegramChatId,
+      alertChatId,
       formatErrorRateAlert(data),
     )
   }
@@ -107,10 +135,41 @@ async function handleErrorRateAlert(
  * BullMQ handles retries (3 attempts, exponential backoff) — the retry
  * config is set at enqueue time in notification.service.ts.
  */
-export function createNotificationWorker(deps: NotificationWorkerDeps): Worker {
+export interface NotificationWorkerHandle {
+  worker: Worker
+  close: () => Promise<void>
+}
+
+export function createNotificationWorker(deps: NotificationWorkerDeps): NotificationWorkerHandle {
   const { redis, pubRedis, telegramBotToken } = deps
 
   const telegramApi = telegramBotToken ? new Api(telegramBotToken) : null
+
+  // Subscribe to moltbook:activity channel for agent post/comment notifications.
+  // pubRedis is for publishing — we duplicate it for subscribing (ioredis requirement).
+  const subRedis = pubRedis.duplicate()
+  subRedis.subscribe('moltbook:activity').catch(() => {})
+  subRedis.on('message', async (_channel: string, message: string) => {
+    if (!telegramApi) return
+    try {
+      const data = JSON.parse(message) as MoltbookActivityPayload
+
+      // Look up the agent's ownerAddress from gateway agent record
+      const agentJson = await redis.get(`agent:${data.gatewayAgentId}:config`)
+      if (!agentJson) return
+
+      const agent = JSON.parse(agentJson) as { ownerAddress?: string }
+      const ownerAddress = data.ownerAddress ?? agent.ownerAddress
+      if (!ownerAddress) return
+
+      const chatId = await redis.get(`tg:${ownerAddress}`)
+      if (!chatId) return
+
+      await telegramApi.sendMessage(chatId, formatMoltbookActivity(data))
+    } catch {
+      // Non-critical — swallow errors from pub/sub handler
+    }
+  })
 
   const worker = new Worker(
     'notifications',
@@ -138,9 +197,19 @@ export function createNotificationWorker(deps: NotificationWorkerDeps): Worker {
       }
 
       // ── Telegram delivery (AC: 3, 5) ────────────────────────────────
-      if (telegramApi && config.telegramChatId) {
+      // First check server-level chatId, then fall back to user-level
+      // (per-wallet) Telegram connection stored as tg:{walletAddress}
+      let telegramChatId = config.telegramChatId
+      if (!telegramChatId) {
+        const ownerAddress = await redis.get(`server:${data.serverId}:ownerAddress`)
+        if (ownerAddress) {
+          telegramChatId = (await redis.get(`tg:${ownerAddress}`)) ?? undefined
+        }
+      }
+
+      if (telegramApi && telegramChatId) {
         await telegramApi.sendMessage(
-          config.telegramChatId,
+          telegramChatId,
           formatTelegramMessage(data),
         )
       }
@@ -173,5 +242,11 @@ export function createNotificationWorker(deps: NotificationWorkerDeps): Worker {
     { connection: redis as any }, // eslint-disable-line @typescript-eslint/no-explicit-any
   )
 
-  return worker
+  return {
+    worker,
+    close: async () => {
+      await worker.close()
+      await subRedis.quit()
+    },
+  }
 }

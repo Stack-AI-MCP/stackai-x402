@@ -10,7 +10,7 @@ interface AgentCardProps {
   description: string
   toolCount: number
   moltbookName?: string
-  network: 'mainnet' | 'testnet'
+  network?: 'mainnet' | 'testnet'
 }
 
 /**

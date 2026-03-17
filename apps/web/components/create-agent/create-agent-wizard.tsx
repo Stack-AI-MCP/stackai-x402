@@ -1,11 +1,12 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { ChevronLeft, ChevronRight, Loader2, Check, Wrench, Wallet, Eye } from 'lucide-react'
+import { Loader2, Check, Sparkles, MessageCircle, ExternalLink } from 'lucide-react'
 import { useX402Wallet } from '@/hooks/use-x402-wallet'
 import { cn } from '@/lib/utils/format'
 
 const GATEWAY_URL = process.env.NEXT_PUBLIC_GATEWAY_URL ?? 'http://localhost:3001'
+const BOT_USERNAME = 'StackAI402Bot'
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -21,15 +22,51 @@ interface SelectedTool {
   price: number
 }
 
+export interface AgentCreatedInfo {
+  agentId: string
+  hasMoltbook: boolean
+  moltbookName?: string
+}
+
 interface CreateAgentWizardProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  onCreated?: (agentId: string) => void
+  onCreated?: (info: AgentCreatedInfo) => void
 }
 
 // ─── Steps ──────────────────────────────────────────────────────────────────
 
-const STEPS = ['Identity', 'Tools', 'Payment', 'Review'] as const
+const STEPS = ['Identity', 'Tools', 'Moltbook', 'Review'] as const
+
+/**
+ * Generate a system prompt from agent metadata and selected tools.
+ * This runs client-side for instant feedback — a more sophisticated
+ * AI-generated version can be added via a gateway endpoint later.
+ */
+function generateSystemPrompt(
+  agentName: string,
+  agentDescription: string,
+  tools: SelectedTool[],
+  servers: ServerWithTools[],
+): string {
+  const toolNames = tools.map((t) => {
+    const server = servers.find((s) => s.serverId === t.serverId)
+    const toolMeta = server?.tools.find((st) => st.name === t.toolName)
+    return toolMeta ? `- ${t.toolName}: ${toolMeta.description}` : `- ${t.toolName}`
+  })
+
+  return [
+    `You are ${agentName}, a promotional AI agent on Moltbook.`,
+    agentDescription ? `\n${agentDescription}` : '',
+    '',
+    'Your tools:',
+    ...toolNames,
+    '',
+    'When posting on Moltbook, write engaging content about your capabilities.',
+    'Share insights, tips, and use cases related to your tools.',
+    'Keep posts concise and valuable to the community.',
+  ].filter(Boolean).join('\n')
+}
 
 export function CreateAgentWizard({ open, onOpenChange, onCreated }: CreateAgentWizardProps) {
   const { address, signMessage } = useX402Wallet()
@@ -40,17 +77,19 @@ export function CreateAgentWizard({ open, onOpenChange, onCreated }: CreateAgent
   // Step 1: Identity
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
-  const [moltbookName, setMoltbookName] = useState('')
-  const [moltbookApiKey, setMoltbookApiKey] = useState('')
-  const [heartbeatInterval, setHeartbeatInterval] = useState(6)
 
   // Step 2: Tools
   const [servers, setServers] = useState<ServerWithTools[]>([])
   const [loadingServers, setLoadingServers] = useState(false)
   const [selectedTools, setSelectedTools] = useState<SelectedTool[]>([])
 
-  // Step 3: Payment
-  const [network, setNetwork] = useState<'mainnet' | 'testnet'>('mainnet')
+  // Step 3: Moltbook Config
+  const [moltbookName, setMoltbookName] = useState('')
+  const [moltbookApiKey, setMoltbookApiKey] = useState('')
+  const [heartbeatInterval, setHeartbeatInterval] = useState(6)
+  const [systemPrompt, setSystemPrompt] = useState('')
+  const [notifyTelegram, setNotifyTelegram] = useState(false)
+  const [telegramConnected, setTelegramConnected] = useState(false)
 
   // Load servers when step 2 is shown
   useEffect(() => {
@@ -59,7 +98,6 @@ export function CreateAgentWizard({ open, onOpenChange, onCreated }: CreateAgent
     fetch(`${GATEWAY_URL}/api/v1/servers`)
       .then((r) => r.json())
       .then(async (data: { servers: Array<{ serverId: string; name: string }> }) => {
-        // Fetch tools for each server
         const withTools = await Promise.all(
           data.servers.map(async (s) => {
             try {
@@ -77,6 +115,17 @@ export function CreateAgentWizard({ open, onOpenChange, onCreated }: CreateAgent
       .finally(() => setLoadingServers(false))
   }, [step, servers.length])
 
+  // Check Telegram connection when entering Moltbook step
+  useEffect(() => {
+    if (step !== 2 || !address) return
+    fetch(`${GATEWAY_URL}/api/v1/telegram/status?address=${encodeURIComponent(address)}`)
+      .then((r) => r.ok ? r.json() : null)
+      .then((data) => {
+        if (data) setTelegramConnected(data.connected)
+      })
+      .catch(() => {})
+  }, [step, address])
+
   const toggleTool = (serverId: string, toolName: string, defaultPrice: number) => {
     setSelectedTools((prev) => {
       const exists = prev.find((t) => t.serverId === serverId && t.toolName === toolName)
@@ -85,16 +134,41 @@ export function CreateAgentWizard({ open, onOpenChange, onCreated }: CreateAgent
     })
   }
 
-  const updateToolPrice = (serverId: string, toolName: string, price: number) => {
-    setSelectedTools((prev) =>
-      prev.map((t) => (t.serverId === serverId && t.toolName === toolName ? { ...t, price } : t)),
-    )
+  const [generating, setGenerating] = useState(false)
+
+  const handleGeneratePrompt = async () => {
+    if (selectedTools.length === 0) return
+
+    // Build tool metadata for the LLM
+    const toolsWithDescriptions = selectedTools.map((t) => {
+      const server = servers.find((s) => s.serverId === t.serverId)
+      const meta = server?.tools.find((st) => st.name === t.toolName)
+      return { name: t.toolName, description: meta?.description }
+    })
+
+    setGenerating(true)
+    try {
+      const res = await fetch('/api/generate-prompt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agentName: name, description, tools: toolsWithDescriptions }),
+      })
+      if (!res.ok) throw new Error('Failed to generate')
+      const data = await res.json()
+      setSystemPrompt(data.prompt)
+    } catch {
+      // Fallback to template
+      const prompt = generateSystemPrompt(name, description, selectedTools, servers)
+      setSystemPrompt(prompt)
+    } finally {
+      setGenerating(false)
+    }
   }
 
   const canNext = () => {
     if (step === 0) return name.trim().length > 0 && description.trim().length > 0
     if (step === 1) return selectedTools.length > 0
-    if (step === 2) return !!address
+    if (step === 2) return true // Moltbook is optional
     return true
   }
 
@@ -104,7 +178,6 @@ export function CreateAgentWizard({ open, onOpenChange, onCreated }: CreateAgent
     setError(null)
 
     try {
-      // Sign message with wallet to prove ownership
       const message = JSON.stringify({ action: 'createAgent', name, timestamp: new Date().toISOString() })
       const { signature, publicKey } = await signMessage(message)
 
@@ -116,8 +189,12 @@ export function CreateAgentWizard({ open, onOpenChange, onCreated }: CreateAgent
           description,
           ownerAddress: address,
           tools: selectedTools,
-          network,
-          ...(moltbookName && { moltbookName, moltbookApiKey, heartbeatIntervalHours: heartbeatInterval }),
+          ...(systemPrompt && { systemPrompt }),
+          ...(moltbookName && {
+            moltbookName,
+            moltbookApiKey,
+            heartbeatIntervalHours: heartbeatInterval,
+          }),
           signature,
           publicKey,
           signedMessage: message,
@@ -131,7 +208,11 @@ export function CreateAgentWizard({ open, onOpenChange, onCreated }: CreateAgent
 
       const agent = await res.json()
       onOpenChange(false)
-      onCreated?.(agent.agentId)
+      onCreated?.({
+        agentId: agent.agentId,
+        hasMoltbook: Boolean(moltbookName),
+        moltbookName: moltbookName || undefined,
+      })
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create agent')
     } finally {
@@ -141,9 +222,11 @@ export function CreateAgentWizard({ open, onOpenChange, onCreated }: CreateAgent
 
   if (!open) return null
 
+  const telegramDeepLink = address ? `https://t.me/${BOT_USERNAME}?start=${address}` : '#'
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-      <div className="w-full max-w-2xl mx-4 bg-background border border-border rounded-[2px] shadow-xl max-h-[90vh] overflow-y-auto">
+      <div className="w-full max-w-2xl mx-4 bg-background border border-border rounded-xl shadow-xl max-h-[90vh] overflow-y-auto">
         {/* Header with steps */}
         <div className="sticky top-0 bg-background border-b border-border p-6 pb-4 z-10">
           <div className="flex items-center justify-between mb-4">
@@ -190,8 +273,8 @@ export function CreateAgentWizard({ open, onOpenChange, onCreated }: CreateAgent
                   type="text"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder="e.g. Weather Oracle"
-                  className="w-full h-11 px-4 font-mono text-sm bg-background border border-border text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50"
+                  placeholder="e.g. DeFi Oracle"
+                  className="w-full h-11 px-4 font-mono text-sm bg-background border border-border text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 rounded-lg"
                 />
               </div>
 
@@ -202,74 +285,21 @@ export function CreateAgentWizard({ open, onOpenChange, onCreated }: CreateAgent
                 <textarea
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
-                  placeholder="What does this agent do?"
+                  placeholder="What does this agent do? What tools does it promote?"
                   rows={3}
-                  className="w-full px-4 py-3 font-mono text-sm bg-background border border-border text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 resize-none"
+                  className="w-full px-4 py-3 font-mono text-sm bg-background border border-border text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 resize-none rounded-lg"
                 />
               </div>
 
-              <div className="space-y-2">
-                <label className="text-[11px] font-mono font-bold uppercase tracking-widest text-muted-foreground">
-                  Moltbook Username (optional)
-                </label>
-                <input
-                  type="text"
-                  value={moltbookName}
-                  onChange={(e) => setMoltbookName(e.target.value)}
-                  placeholder="e.g. weather-bot"
-                  className="w-full h-11 px-4 font-mono text-sm bg-background border border-border text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50"
-                />
-                <p className="text-[10px] text-muted-foreground">Links to moltbook.com/u/{'<name>'}</p>
-              </div>
-
-              {moltbookName && (
-                <>
-                  <div className="space-y-2">
-                    <label className="text-[11px] font-mono font-bold uppercase tracking-widest text-muted-foreground">
-                      Moltbook API Key
-                    </label>
-                    <input
-                      type="password"
-                      value={moltbookApiKey}
-                      onChange={(e) => setMoltbookApiKey(e.target.value)}
-                      placeholder="moltbook_..."
-                      className="w-full h-11 px-4 font-mono text-sm bg-background border border-border text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50"
-                    />
-                    <p className="text-[10px] text-muted-foreground">Required for Moltbook agent registration and posting.</p>
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="text-[11px] font-mono font-bold uppercase tracking-widest text-muted-foreground">
-                      Heartbeat Interval
-                    </label>
-                    <div className="flex gap-2 flex-wrap">
-                      {[1, 4, 6, 8, 12, 24].map((h) => (
-                        <button
-                          key={h}
-                          type="button"
-                          onClick={() => setHeartbeatInterval(h)}
-                          className={cn(
-                            'h-9 px-3 text-[11px] font-mono font-bold border rounded-[2px] transition-colors',
-                            heartbeatInterval === h
-                              ? 'border-foreground bg-foreground text-background'
-                              : 'border-border text-muted-foreground hover:border-foreground',
-                          )}
-                        >
-                          {h}h
-                        </button>
-                      ))}
-                    </div>
-                    <p className="text-[10px] text-muted-foreground">How often the agent browses feed and engages on Moltbook.</p>
-                  </div>
-                </>
-              )}
             </div>
           )}
 
           {/* Step 2: Tools */}
           {step === 1 && (
             <div className="space-y-4">
-              <p className="text-sm text-muted-foreground">Select tools from registered servers and set per-tool pricing.</p>
+              <p className="text-sm text-muted-foreground">
+                Select tools from your registered servers. Pricing is inherited from server registration.
+              </p>
 
               {loadingServers ? (
                 <div className="flex items-center justify-center py-12">
@@ -279,7 +309,7 @@ export function CreateAgentWizard({ open, onOpenChange, onCreated }: CreateAgent
                 <p className="text-center text-sm text-muted-foreground py-8">No servers registered yet.</p>
               ) : (
                 servers.map((server) => (
-                  <div key={server.serverId} className="border border-border rounded-[2px] p-4 space-y-3">
+                  <div key={server.serverId} className="border border-border rounded-xl p-4 space-y-3">
                     <h4 className="font-bold text-sm">{server.name}</h4>
                     <div className="space-y-2">
                       {server.tools.map((tool) => {
@@ -292,7 +322,7 @@ export function CreateAgentWizard({ open, onOpenChange, onCreated }: CreateAgent
                               type="button"
                               onClick={() => toggleTool(server.serverId, tool.name, tool.price)}
                               className={cn(
-                                'h-5 w-5 rounded-[2px] border flex items-center justify-center shrink-0 transition-colors',
+                                'h-5 w-5 rounded border flex items-center justify-center shrink-0 transition-colors',
                                 selected ? 'bg-foreground border-foreground' : 'border-border hover:border-foreground',
                               )}
                             >
@@ -302,19 +332,9 @@ export function CreateAgentWizard({ open, onOpenChange, onCreated }: CreateAgent
                               <code className="text-xs font-mono text-foreground">{tool.name}</code>
                               <p className="text-[10px] text-muted-foreground truncate">{tool.description}</p>
                             </div>
-                            {selected && (
-                              <div className="flex items-center gap-1 shrink-0">
-                                <span className="text-[10px] text-muted-foreground">$</span>
-                                <input
-                                  type="number"
-                                  min="0"
-                                  step="0.001"
-                                  value={selected.price}
-                                  onChange={(e) => updateToolPrice(server.serverId, tool.name, parseFloat(e.target.value) || 0)}
-                                  className="w-20 h-7 px-2 text-xs font-mono border border-border bg-background text-right"
-                                />
-                              </div>
-                            )}
+                            <span className="text-[10px] font-mono text-muted-foreground shrink-0">
+                              {tool.price > 0 ? `$${tool.price}` : 'FREE'}
+                            </span>
                           </div>
                         )
                       })}
@@ -329,40 +349,137 @@ export function CreateAgentWizard({ open, onOpenChange, onCreated }: CreateAgent
             </div>
           )}
 
-          {/* Step 3: Payment */}
+          {/* Step 3: Moltbook Config */}
           {step === 2 && (
             <div className="space-y-5">
-              <div className="space-y-2">
-                <label className="text-[11px] font-mono font-bold uppercase tracking-widest text-muted-foreground">
-                  Payment Recipient
-                </label>
-                <div className="h-11 px-4 flex items-center border border-border bg-muted/30 font-mono text-sm text-foreground truncate">
-                  {address ?? 'Connect wallet first'}
-                </div>
-                <p className="text-[10px] text-muted-foreground">Payments for agent tool calls go to your connected wallet address.</p>
-              </div>
+              <p className="text-sm text-muted-foreground">
+                Connect to Moltbook to let your agent autonomously promote your tools. This step is optional.
+              </p>
 
               <div className="space-y-2">
                 <label className="text-[11px] font-mono font-bold uppercase tracking-widest text-muted-foreground">
-                  Network
+                  Moltbook Username
                 </label>
-                <div className="flex gap-2">
-                  {(['mainnet', 'testnet'] as const).map((n) => (
+                <input
+                  type="text"
+                  value={moltbookName}
+                  onChange={(e) => setMoltbookName(e.target.value)}
+                  placeholder="e.g. defi-oracle"
+                  className="w-full h-11 px-4 font-mono text-sm bg-background border border-border text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 rounded-lg"
+                />
+                <p className="text-[10px] text-muted-foreground">Your agent&apos;s handle on moltbook.com</p>
+              </div>
+
+              {moltbookName && (
+                <>
+                  <div className="space-y-2">
+                    <label className="text-[11px] font-mono font-bold uppercase tracking-widest text-muted-foreground">
+                      Moltbook API Key
+                    </label>
+                    <input
+                      type="password"
+                      value={moltbookApiKey}
+                      onChange={(e) => setMoltbookApiKey(e.target.value)}
+                      placeholder="moltbook_..."
+                      className="w-full h-11 px-4 font-mono text-sm bg-background border border-border text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 rounded-lg"
+                    />
+                    <p className="text-[10px] text-muted-foreground">Required for Moltbook registration and posting.</p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-[11px] font-mono font-bold uppercase tracking-widest text-muted-foreground">
+                      Heartbeat Interval
+                    </label>
+                    <div className="flex gap-2 flex-wrap">
+                      {[1, 4, 6, 8, 12, 24].map((h) => (
+                        <button
+                          key={h}
+                          type="button"
+                          onClick={() => setHeartbeatInterval(h)}
+                          className={cn(
+                            'h-9 px-3 text-[11px] font-mono font-bold border rounded-lg transition-colors',
+                            heartbeatInterval === h
+                              ? 'border-foreground bg-foreground text-background'
+                              : 'border-border text-muted-foreground hover:border-foreground',
+                          )}
+                        >
+                          {h}h
+                        </button>
+                      ))}
+                    </div>
+                    <p className="text-[10px] text-muted-foreground">How often the agent browses feed and engages.</p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[11px] font-mono font-bold uppercase tracking-widest text-muted-foreground">
+                        System Prompt
+                      </label>
+                      <button
+                        type="button"
+                        onClick={handleGeneratePrompt}
+                        disabled={generating || selectedTools.length === 0}
+                        className="flex items-center gap-1.5 text-[10px] font-mono font-bold text-primary hover:text-primary/80 transition-colors disabled:opacity-40"
+                      >
+                        {generating ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
+                        {generating ? 'GENERATING...' : 'GENERATE WITH AI'}
+                      </button>
+                    </div>
+                    <textarea
+                      value={systemPrompt}
+                      onChange={(e) => setSystemPrompt(e.target.value)}
+                      placeholder="Instructions for your agent's personality, tone, and posting behavior..."
+                      rows={5}
+                      className="w-full px-4 py-3 font-mono text-xs bg-background border border-border text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 resize-none rounded-lg"
+                    />
+                    <p className="text-[10px] text-muted-foreground">
+                      Drives your agent&apos;s Moltbook posting behavior. Click Generate to create one from your tools.
+                    </p>
+                  </div>
+                </>
+              )}
+
+              {/* Telegram notification toggle */}
+              <div className="border border-border rounded-xl p-4 space-y-3">
+                <div className="flex items-center gap-2">
+                  <MessageCircle className="h-4 w-4 text-[#0088cc]" />
+                  <span className="text-sm font-medium">Telegram Notifications</span>
+                </div>
+
+                {telegramConnected ? (
+                  <label className="flex items-center gap-3 cursor-pointer">
                     <button
-                      key={n}
                       type="button"
-                      onClick={() => setNetwork(n)}
+                      onClick={() => setNotifyTelegram(!notifyTelegram)}
                       className={cn(
-                        'h-9 px-4 text-[11px] font-mono font-bold uppercase tracking-widest border rounded-[2px] transition-colors',
-                        network === n
-                          ? 'border-foreground bg-foreground text-background'
-                          : 'border-border text-muted-foreground hover:border-foreground',
+                        'h-5 w-5 rounded border flex items-center justify-center shrink-0 transition-colors',
+                        notifyTelegram ? 'bg-foreground border-foreground' : 'border-border hover:border-foreground',
                       )}
                     >
-                      {n}
+                      {notifyTelegram && <Check className="h-3 w-3 text-background" />}
                     </button>
-                  ))}
-                </div>
+                    <span className="text-sm text-muted-foreground">
+                      Notify me when this agent posts or comments on Moltbook
+                    </span>
+                  </label>
+                ) : (
+                  <div className="space-y-2">
+                    <p className="text-xs text-muted-foreground">
+                      Connect Telegram first to receive agent activity notifications.
+                    </p>
+                    {address && (
+                      <a
+                        href={telegramDeepLink}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-2 text-xs font-mono text-[#0088cc] hover:underline"
+                      >
+                        Connect @{BOT_USERNAME}
+                        <ExternalLink className="h-3 w-3" />
+                      </a>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -370,7 +487,7 @@ export function CreateAgentWizard({ open, onOpenChange, onCreated }: CreateAgent
           {/* Step 4: Review */}
           {step === 3 && (
             <div className="space-y-4">
-              <div className="border border-border rounded-[2px] p-4 space-y-3">
+              <div className="border border-border rounded-xl p-4 space-y-3">
                 <div className="flex justify-between">
                   <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-muted-foreground">NAME</span>
                   <span className="text-sm font-bold">{name}</span>
@@ -380,11 +497,7 @@ export function CreateAgentWizard({ open, onOpenChange, onCreated }: CreateAgent
                   <span className="text-sm font-mono">{selectedTools.length}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-muted-foreground">NETWORK</span>
-                  <span className="text-sm font-mono uppercase">{network}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-muted-foreground">RECIPIENT</span>
+                  <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-muted-foreground">WALLET</span>
                   <span className="text-xs font-mono truncate ml-4">{address}</span>
                 </div>
                 {moltbookName && (
@@ -397,12 +510,20 @@ export function CreateAgentWizard({ open, onOpenChange, onCreated }: CreateAgent
                       <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-muted-foreground">HEARTBEAT</span>
                       <span className="text-sm font-mono">Every {heartbeatInterval}h</span>
                     </div>
+                    {notifyTelegram && (
+                      <div className="flex justify-between">
+                        <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-muted-foreground">TELEGRAM</span>
+                        <span className="text-xs text-green-600 dark:text-green-400 flex items-center gap-1">
+                          <MessageCircle className="h-3 w-3" /> Notifications on
+                        </span>
+                      </div>
+                    )}
                   </>
                 )}
               </div>
 
               {/* Tool list summary */}
-              <div className="border border-border rounded-[2px] p-4 space-y-2">
+              <div className="border border-border rounded-xl p-4 space-y-2">
                 <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-muted-foreground">SELECTED TOOLS</span>
                 {selectedTools.map((t) => (
                   <div key={`${t.serverId}-${t.toolName}`} className="flex justify-between text-xs font-mono">
@@ -412,8 +533,15 @@ export function CreateAgentWizard({ open, onOpenChange, onCreated }: CreateAgent
                 ))}
               </div>
 
+              {systemPrompt && (
+                <div className="border border-border rounded-xl p-4 space-y-2">
+                  <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-muted-foreground">SYSTEM PROMPT</span>
+                  <p className="text-xs font-mono text-muted-foreground whitespace-pre-wrap line-clamp-6">{systemPrompt}</p>
+                </div>
+              )}
+
               {error && (
-                <div className="text-sm text-destructive bg-destructive/10 border border-destructive/20 rounded-[2px] p-3">
+                <div className="text-sm text-destructive bg-destructive/10 border border-destructive/20 rounded-xl p-3">
                   {error}
                 </div>
               )}
@@ -430,7 +558,7 @@ export function CreateAgentWizard({ open, onOpenChange, onCreated }: CreateAgent
           <button
             type="button"
             onClick={() => (step === 0 ? onOpenChange(false) : setStep(step - 1))}
-            className="h-10 px-4 text-[10px] font-mono font-bold uppercase tracking-widest text-muted-foreground hover:text-foreground border border-border rounded-[2px] transition-colors"
+            className="h-10 px-4 text-[10px] font-mono font-bold uppercase tracking-widest text-muted-foreground hover:text-foreground border border-border rounded-lg transition-colors"
           >
             {step === 0 ? 'CANCEL' : 'BACK'}
           </button>
@@ -440,16 +568,16 @@ export function CreateAgentWizard({ open, onOpenChange, onCreated }: CreateAgent
               type="button"
               onClick={() => setStep(step + 1)}
               disabled={!canNext()}
-              className="h-10 px-6 text-[10px] font-mono font-bold uppercase tracking-widest bg-foreground text-background rounded-[2px] disabled:opacity-40 disabled:cursor-not-allowed transition-colors hover:bg-foreground/90"
+              className="h-10 px-6 text-[10px] font-mono font-bold uppercase tracking-widest bg-foreground text-background rounded-lg disabled:opacity-40 disabled:cursor-not-allowed transition-colors hover:bg-foreground/90"
             >
-              NEXT
+              {step === 2 ? (moltbookName ? 'NEXT' : 'SKIP') : 'NEXT'}
             </button>
           ) : (
             <button
               type="button"
               onClick={handleSubmit}
               disabled={submitting || !address}
-              className="h-10 px-6 text-[10px] font-mono font-bold uppercase tracking-widest bg-foreground text-background rounded-[2px] disabled:opacity-40 disabled:cursor-not-allowed transition-colors hover:bg-foreground/90 flex items-center gap-2"
+              className="h-10 px-6 text-[10px] font-mono font-bold uppercase tracking-widest bg-foreground text-background rounded-lg disabled:opacity-40 disabled:cursor-not-allowed transition-colors hover:bg-foreground/90 flex items-center gap-2"
             >
               {submitting ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
               CREATE AGENT

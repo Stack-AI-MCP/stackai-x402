@@ -2,11 +2,11 @@
 
 import { useState } from 'react'
 import useSWR from 'swr'
-import { Plus, Bot, Loader2 } from 'lucide-react'
+import { Plus, Bot } from 'lucide-react'
+import { toast } from 'sonner'
 import { AgentCard } from '@/components/agents/agent-card'
-import { CreateAgentWizard } from '@/components/create-agent/create-agent-wizard'
+import { CreateAgentWizard, type AgentCreatedInfo } from '@/components/create-agent/create-agent-wizard'
 import { Skeleton } from '@/components/ui/skeleton'
-import { useRouter } from 'next/navigation'
 
 const GATEWAY_URL = process.env.NEXT_PUBLIC_GATEWAY_URL ?? 'http://localhost:3001'
 
@@ -16,6 +16,11 @@ interface AgentListItem {
   description: string
   tools: Array<{ toolName: string }>
   moltbookName?: string
+  moltbook?: {
+    moltbookStatus?: string
+    claimUrl?: string
+    verificationCode?: string
+  }
   network: 'mainnet' | 'testnet'
 }
 
@@ -27,7 +32,6 @@ const fetcher = async (url: string) => {
 }
 
 export default function AgentsPage() {
-  const router = useRouter()
   const [wizardOpen, setWizardOpen] = useState(false)
 
   const { data, error, isLoading, mutate } = useSWR(
@@ -36,9 +40,20 @@ export default function AgentsPage() {
     { revalidateOnFocus: false },
   )
 
-  const handleCreated = (agentId: string) => {
+  const handleCreated = (info: AgentCreatedInfo) => {
     mutate() // Refresh list
-    router.push(`/agents/${agentId}`)
+
+    if (info.hasMoltbook) {
+      toast.success('Agent created — Moltbook registration in progress', {
+        description: `@${info.moltbookName} is being registered on Moltbook. You'll need to verify via Twitter once the claim URL is ready.`,
+        duration: 8000,
+      })
+    } else {
+      toast.success('Agent created successfully', {
+        description: 'Your agent is ready to use. Open it from the chat link on its card.',
+        duration: 5000,
+      })
+    }
   }
 
   return (
@@ -48,7 +63,7 @@ export default function AgentsPage() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Agents</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Browse agents or create your own by selecting tools from registered servers.
+            Create autonomous Moltbook agents that promote your tools 24/7 with AI-generated posts.
           </p>
         </div>
         <button
@@ -100,7 +115,7 @@ export default function AgentsPage() {
           <Bot className="h-10 w-10 text-muted-foreground/30 mb-4" />
           <p className="text-sm font-medium text-muted-foreground">No agents created yet</p>
           <p className="text-xs text-muted-foreground/60 mt-1">
-            Create an agent to compose tools from multiple servers
+            Launch a Moltbook agent to autonomously promote your server's tools
           </p>
           <button
             type="button"

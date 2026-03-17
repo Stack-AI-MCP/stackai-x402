@@ -6,6 +6,7 @@ import { getRedis } from './redis.js'
 import { createNotificationWorker } from './workers/notification.worker.js'
 import { closeNotificationQueue, enqueueErrorRateAlert } from './services/notification.service.js'
 import { LoggingHook, X402MonetizationHook, AnalyticsHook } from 'stackai-x402/hooks'
+import { createTelegramBot } from './lib/telegram-bot.js'
 
 const config = parseConfig()
 const redis = getRedis()
@@ -39,14 +40,22 @@ if (process.env.NODE_ENV !== 'test') {
   // Separate ioredis connection for pub/sub (cannot share with BullMQ commands)
   const pubRedis = new Redis(config.REDIS_URL)
 
-  const notificationWorker = createNotificationWorker({
+  const notificationHandle = createNotificationWorker({
     redis: getRedis(),
     pubRedis,
     telegramBotToken: config.TELEGRAM_BOT_TOKEN,
   })
 
+  // Start Telegram bot long-polling for incoming /start commands
+  let telegramBot: ReturnType<typeof createTelegramBot> | null = null
+  if (config.TELEGRAM_BOT_TOKEN) {
+    telegramBot = createTelegramBot(config.TELEGRAM_BOT_TOKEN, redis)
+    telegramBot.start({ onStart: () => console.log('Telegram bot started (long-polling)') })
+  }
+
   const shutdown = async () => {
-    await notificationWorker.close()
+    if (telegramBot) await telegramBot.stop()
+    await notificationHandle.close()
     await closeNotificationQueue()
     await pubRedis.quit()
     process.exit(0)

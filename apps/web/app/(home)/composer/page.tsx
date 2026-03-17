@@ -37,7 +37,7 @@ export default function ComposerPage() {
       <div>
         <h1 className="font-host text-2xl font-bold tracking-tight">Composer</h1>
         <p className="text-sm text-muted-foreground mt-1">
-          Build a custom agent by selecting tools and writing a system prompt.
+          Create a custom chat experience — pick tools, write a system prompt, and get a shareable URL.
         </p>
       </div>
 

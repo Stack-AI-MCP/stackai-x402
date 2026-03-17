@@ -9,7 +9,7 @@ import {
   type ToolSet,
   type UIMessage,
 } from 'ai'
-import { createOpenAI } from '@ai-sdk/openai'
+import { createOpenRouter } from '@openrouter/ai-sdk-provider'
 
 const GATEWAY_URL = process.env.NEXT_PUBLIC_GATEWAY_URL ?? 'http://localhost:3001'
 
@@ -185,10 +185,7 @@ export async function POST(request: Request) {
     )
   }
 
-  const openrouter = createOpenAI({
-    baseURL: 'https://openrouter.ai/api/v1',
-    apiKey: openRouterApiKey,
-  })
+  const openrouter = createOpenRouter({ apiKey: openRouterApiKey })
 
   let tools = buildTools(agentCard, serverId)
 

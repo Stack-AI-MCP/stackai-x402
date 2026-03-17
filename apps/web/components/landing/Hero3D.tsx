@@ -111,7 +111,7 @@ export function Hero3D() {
 
 const ECOSYSTEM_ITEMS = [
   'Stacks', 'Bitcoin', 'sBTC', 'STX', 'USDCx', 'x402', 'Claude', 'Cursor',
-  'ChatGPT', 'DeepSeek', 'Gemini', 'Grok', 'Replicate', 'Leather', 'Xverse', 'aibtcdev',
+  'ChatGPT', 'DeepSeek', 'Gemini', 'Grok', 'Replicate', 'Leather', 'Xverse', 'aibtcdev', 'Moltbook',
 ]
 
 export function SupportedBySection() {

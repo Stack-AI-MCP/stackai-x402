@@ -4,6 +4,7 @@ import { Hero3D, SupportedBySection } from '@/components/landing/Hero3D'
 import { ConsumerInfo } from '@/components/landing/ConsumerInfo'
 import { DeveloperInfo } from '@/components/landing/DeveloperInfo'
 import { FAQSection } from '@/components/landing/FAQSection'
+import { TelegramSection } from '@/components/landing/TelegramSection'
 import { Footer } from '@/components/landing/footer'
 import { ServerCard } from '@/components/x402/ServerCard'
 import { Check } from 'lucide-react'
@@ -131,6 +132,7 @@ export default function LandingPage() {
 
       <DeveloperInfo />
       <StatsSection />
+      <TelegramSection />
       <FAQSection />
       <GithubInfo />
 

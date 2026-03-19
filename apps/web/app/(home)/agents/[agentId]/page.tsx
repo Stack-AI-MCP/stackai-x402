@@ -20,6 +20,7 @@ import {
   Loader2,
   Bell,
   Power,
+  Key,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useX402Wallet } from '@/hooks/use-x402-wallet'
@@ -56,6 +57,7 @@ interface AgentDetail {
   updatedAt: string
   moltbookName?: string
   moltbookAgentId?: string
+  hasMoltbookApiKey?: boolean
   systemPrompt?: string
   starterPrompts?: string[]
   heartbeatIntervalHours?: number
@@ -191,6 +193,7 @@ export default function AgentDetailPage() {
   const [editSystemPrompt, setEditSystemPrompt] = useState('')
   const [editHeartbeat, setEditHeartbeat] = useState(6)
   const [editHeartbeatEnabled, setEditHeartbeatEnabled] = useState(true)
+  const [editMoltbookApiKey, setEditMoltbookApiKey] = useState('')
   const [editNotifyOnPost, setEditNotifyOnPost] = useState(true)
   const [editNotifyOnComment, setEditNotifyOnComment] = useState(true)
   const [editNotifyOnUpvote, setEditNotifyOnUpvote] = useState(true)
@@ -221,6 +224,7 @@ export default function AgentDetailPage() {
     setEditSystemPrompt(agent.systemPrompt ?? '')
     setEditHeartbeat(agent.heartbeatIntervalHours ?? 6)
     setEditHeartbeatEnabled(agent.heartbeatEnabled !== false)
+    setEditMoltbookApiKey('')
     setEditNotifyOnPost(agent.notifyOnPost !== false)
     setEditNotifyOnComment(agent.notifyOnComment !== false)
     setEditNotifyOnUpvote(agent.notifyOnUpvote !== false)
@@ -256,6 +260,9 @@ export default function AgentDetailPage() {
       }
       if (editHeartbeatEnabled !== (agent.heartbeatEnabled !== false)) {
         updates.heartbeatEnabled = editHeartbeatEnabled
+      }
+      if (editMoltbookApiKey && editMoltbookApiKey.startsWith('moltbook_')) {
+        updates.moltbookApiKey = editMoltbookApiKey
       }
       if (editNotifyOnPost !== (agent.notifyOnPost !== false)) {
         updates.notifyOnPost = editNotifyOnPost
@@ -648,6 +655,23 @@ export default function AgentDetailPage() {
                   ))}
                 </div>
               </div>
+
+              {/* Moltbook API Key */}
+              <div className="space-y-2">
+                <label className="text-xs text-muted-foreground">
+                  Moltbook API Key {agent.hasMoltbookApiKey && <span className="text-emerald-600 dark:text-emerald-400">(configured)</span>}
+                </label>
+                <input
+                  type="password"
+                  value={editMoltbookApiKey}
+                  onChange={(e) => setEditMoltbookApiKey(e.target.value)}
+                  placeholder={agent.hasMoltbookApiKey ? 'Leave blank to keep current key' : 'moltbook_sk_...'}
+                  className="w-full h-9 px-3 text-sm font-mono border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-primary placeholder:text-muted-foreground/50"
+                />
+                {editMoltbookApiKey && !editMoltbookApiKey.startsWith('moltbook_') && (
+                  <p className="text-[10px] text-red-500 font-mono">Key must start with &quot;moltbook_&quot;</p>
+                )}
+              </div>
             </div>
           ) : (
             <div className="flex items-center gap-3 text-sm">
@@ -673,6 +697,19 @@ export default function AgentDetailPage() {
               {(heartbeatHours ?? 6) < 0.5 && (
                 <span className="text-[10px] text-amber-600 dark:text-amber-400 font-mono uppercase tracking-widest">
                   Testing mode
+                </span>
+              )}
+              <span className="text-muted-foreground mx-1">|</span>
+              <span className="text-muted-foreground">API Key:</span>
+              {agent.hasMoltbookApiKey ? (
+                <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-mono font-bold text-xs">
+                  <Key className="h-3 w-3" />
+                  Configured
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1 text-red-500 font-mono font-bold text-xs">
+                  <Key className="h-3 w-3" />
+                  Missing
                 </span>
               )}
             </div>

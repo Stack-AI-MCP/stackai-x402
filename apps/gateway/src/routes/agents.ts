@@ -44,6 +44,7 @@ const UpdateAgentSchema = z.object({
   description: z.string().min(1).optional(),
   tools: z.array(AgentToolSchema).min(1).optional(),
   moltbookName: z.string().optional(),
+  moltbookApiKey: z.string().startsWith('moltbook_').optional(),
   systemPrompt: z.string().optional(),
   starterPrompts: z.array(z.string()).optional(),
   heartbeatIntervalHours: z.number().min(0.01).max(24).optional(),
@@ -69,7 +70,7 @@ agentsRouter.get('/', async (c) => {
   try {
     const result = await listAgents({ redis }, { page, limit })
     return c.json({
-      agents: result.agents,
+      agents: result.agents.map(({ moltbookApiKey: _, ...a }) => ({ ...a, hasMoltbookApiKey: Boolean(_) })),
       pagination: {
         page,
         limit,
@@ -184,7 +185,14 @@ agentsRouter.get('/:agentId', async (c) => {
   const moltbookStatusJson = await redis.get(`moltbook:status:${agentId}`)
   const moltbook = moltbookStatusJson ? JSON.parse(moltbookStatusJson) : undefined
 
-  return c.json({ ...agent, tools: resolvedTools, ...(moltbook && { moltbook }) })
+  // Strip the API key from response — never expose secrets in GET
+  const { moltbookApiKey: _apiKey, ...safeAgent } = agent
+  return c.json({
+    ...safeAgent,
+    hasMoltbookApiKey: Boolean(_apiKey),
+    tools: resolvedTools,
+    ...(moltbook && { moltbook }),
+  })
 })
 
 // ─── Update agent: PUT /agents/:agentId ──────────────────────────────────────
@@ -234,6 +242,30 @@ agentsRouter.put('/:agentId', async (c) => {
   }
 
   const updated = await updateAgent(agentId, updates, { redis })
+
+  // Propagate moltbookApiKey to moltbook agent config in Redis if updated
+  if (updates.moltbookApiKey && existing.moltbookName) {
+    try {
+      // Find the moltbook agent config key for this gateway agent
+      let cursor = '0'
+      do {
+        const [next, keys] = await (redis as any).scan(cursor, 'MATCH', 'moltbook:agent:*:config', 'COUNT', 50) // eslint-disable-line @typescript-eslint/no-explicit-any
+        cursor = next
+        for (const key of keys) {
+          const json = await (redis as any).get(key) // eslint-disable-line @typescript-eslint/no-explicit-any
+          if (!json) continue
+          const config = JSON.parse(json)
+          if (config.gatewayAgentId === agentId || config.moltbookName === existing.moltbookName) {
+            config.moltbookApiKey = updates.moltbookApiKey
+            await (redis as any).set(key, JSON.stringify(config)) // eslint-disable-line @typescript-eslint/no-explicit-any
+          }
+        }
+      } while (cursor !== '0')
+    } catch (err) {
+      console.error('Failed to propagate moltbookApiKey to moltbook config:', err)
+    }
+  }
+
   return c.json(updated)
 })
 

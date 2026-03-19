@@ -16,6 +16,7 @@ export interface AgentConfig {
   ownerAddress: string
   moltbookAgentId?: string
   moltbookName?: string
+  moltbookApiKey?: string
   tools: AgentTool[]
   systemPrompt?: string
   starterPrompts?: string[]
@@ -169,7 +170,7 @@ export async function listAgents(
 
 export async function updateAgent(
   agentId: string,
-  updates: Partial<Pick<AgentConfig, 'name' | 'description' | 'tools' | 'moltbookName' | 'moltbookAgentId' | 'systemPrompt' | 'starterPrompts' | 'heartbeatIntervalHours' | 'heartbeatEnabled' | 'notifyOnPost' | 'notifyOnComment' | 'notifyOnUpvote'>>,
+  updates: Partial<Pick<AgentConfig, 'name' | 'description' | 'tools' | 'moltbookName' | 'moltbookApiKey' | 'moltbookAgentId' | 'systemPrompt' | 'starterPrompts' | 'heartbeatIntervalHours' | 'heartbeatEnabled' | 'notifyOnPost' | 'notifyOnComment' | 'notifyOnUpvote'>>,
   deps: { redis: RedisLike },
 ): Promise<AgentConfig | null> {
   const existing = await getAgent(agentId, deps)

@@ -14,6 +14,7 @@ interface MoltbookActivityPayload {
   agentName: string
   action: 'posted' | 'commented'
   detail: string
+  postId?: string
   timestamp: number
 }
 
@@ -31,10 +32,13 @@ function formatTelegramMessage(data: PaymentNotificationPayload): string {
 
 function formatMoltbookActivity(data: MoltbookActivityPayload): string {
   const verb = data.action === 'posted' ? 'posted' : 'commented on'
+  const url = data.postId
+    ? `https://www.moltbook.com/post/${data.postId}`
+    : `https://www.moltbook.com/u/${data.agentName}`
   return [
     `Your agent @${data.agentName} just ${verb}:`,
     `"${data.detail}"`,
-    `https://www.moltbook.com/u/${data.agentName}`,
+    url,
   ].join('\n')
 }
 

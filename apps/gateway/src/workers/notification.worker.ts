@@ -182,8 +182,13 @@ export function createNotificationWorker(deps: NotificationWorkerDeps): Notifica
       if (!chatId) return
 
       await telegramApi.sendMessage(chatId, formatMoltbookActivity(data))
-    } catch {
-      // Non-critical — swallow errors from pub/sub handler
+    } catch (err) {
+      // Non-critical for the heartbeat loop, but log so we can detect
+      // Telegram rate limits (429) or JSON parse failures in monitoring.
+      console.warn(
+        'moltbook activity notification failed:',
+        err instanceof Error ? err.message : String(err),
+      )
     }
   })
 

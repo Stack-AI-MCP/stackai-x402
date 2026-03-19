@@ -243,26 +243,18 @@ agentsRouter.put('/:agentId', async (c) => {
 
   const updated = await updateAgent(agentId, updates, { redis })
 
-  // Propagate moltbookApiKey to moltbook agent config in Redis if updated
+  // Propagate moltbookApiKey update to the moltbook service via Redis queue.
+  // The moltbook service owns its own config keys and knows how to apply updates.
   if (updates.moltbookApiKey && existing.moltbookName) {
     try {
-      // Find the moltbook agent config key for this gateway agent
-      let cursor = '0'
-      do {
-        const [next, keys] = await (redis as any).scan(cursor, 'MATCH', 'moltbook:agent:*:config', 'COUNT', 50) // eslint-disable-line @typescript-eslint/no-explicit-any
-        cursor = next
-        for (const key of keys) {
-          const json = await (redis as any).get(key) // eslint-disable-line @typescript-eslint/no-explicit-any
-          if (!json) continue
-          const config = JSON.parse(json)
-          if (config.gatewayAgentId === agentId || config.moltbookName === existing.moltbookName) {
-            config.moltbookApiKey = updates.moltbookApiKey
-            await (redis as any).set(key, JSON.stringify(config)) // eslint-disable-line @typescript-eslint/no-explicit-any
-          }
-        }
-      } while (cursor !== '0')
+      await (redis as any).lpush('moltbook:agent-registrations', JSON.stringify({ // eslint-disable-line @typescript-eslint/no-explicit-any
+        gatewayAgentId: agentId,
+        moltbookApiKey: updates.moltbookApiKey,
+        moltbookName: existing.moltbookName,
+        action: 'update-api-key',
+      }))
     } catch (err) {
-      console.error('Failed to propagate moltbookApiKey to moltbook config:', err)
+      console.error('Failed to queue moltbookApiKey update:', err)
     }
   }
 
@@ -303,5 +295,20 @@ agentsRouter.delete('/:agentId', async (c) => {
   }
 
   await deleteAgent(agentId, { redis })
+
+  // Clean up associated moltbook keys and notify the moltbook service
+  try {
+    await (redis as any).del(`moltbook:status:${agentId}`) // eslint-disable-line @typescript-eslint/no-explicit-any
+    if (existing.moltbookName) {
+      await (redis as any).lpush('moltbook:agent-registrations', JSON.stringify({ // eslint-disable-line @typescript-eslint/no-explicit-any
+        gatewayAgentId: agentId,
+        moltbookName: existing.moltbookName,
+        action: 'delete',
+      }))
+    }
+  } catch (err) {
+    console.error('Failed to clean up moltbook keys on agent delete:', err)
+  }
+
   return c.json({ message: 'Agent deleted' })
 })

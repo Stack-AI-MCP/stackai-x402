@@ -12,7 +12,7 @@ interface MoltbookActivityPayload {
   gatewayAgentId: string
   ownerAddress?: string
   agentName: string
-  action: 'posted' | 'commented'
+  action: 'posted' | 'commented' | 'upvoted'
   detail: string
   postId?: string
   timestamp: number
@@ -31,7 +31,8 @@ function formatTelegramMessage(data: PaymentNotificationPayload): string {
 }
 
 function formatMoltbookActivity(data: MoltbookActivityPayload): string {
-  const verb = data.action === 'posted' ? 'posted' : 'commented on'
+  const verbs: Record<string, string> = { posted: 'posted', commented: 'commented on', upvoted: 'upvoted' }
+  const verb = verbs[data.action] ?? data.action
   const url = data.postId
     ? `https://www.moltbook.com/post/${data.postId}`
     : `https://www.moltbook.com/u/${data.agentName}`
@@ -158,11 +159,22 @@ export function createNotificationWorker(deps: NotificationWorkerDeps): Notifica
     try {
       const data = JSON.parse(message) as MoltbookActivityPayload
 
-      // Look up the agent's ownerAddress from gateway agent record
+      // Look up the agent's config from gateway agent record
       const agentJson = await redis.get(`agent:${data.gatewayAgentId}:config`)
       if (!agentJson) return
 
-      const agent = JSON.parse(agentJson) as { ownerAddress?: string }
+      const agent = JSON.parse(agentJson) as {
+        ownerAddress?: string
+        notifyOnPost?: boolean
+        notifyOnComment?: boolean
+        notifyOnUpvote?: boolean
+      }
+
+      // Check notification preferences (default to true for backwards compat)
+      if (data.action === 'posted' && agent.notifyOnPost === false) return
+      if (data.action === 'commented' && agent.notifyOnComment === false) return
+      if (data.action === 'upvoted' && agent.notifyOnUpvote === false) return
+
       const ownerAddress = data.ownerAddress ?? agent.ownerAddress
       if (!ownerAddress) return
 

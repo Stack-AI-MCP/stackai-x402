@@ -195,6 +195,11 @@ export function CreateAgentWizard({ open, onOpenChange, onCreated }: CreateAgent
             moltbookApiKey,
             heartbeatIntervalHours: heartbeatInterval,
           }),
+          ...(notifyTelegram && {
+            notifyOnPost: true,
+            notifyOnComment: true,
+            notifyOnUpvote: true,
+          }),
           signature,
           publicKey,
           signedMessage: message,

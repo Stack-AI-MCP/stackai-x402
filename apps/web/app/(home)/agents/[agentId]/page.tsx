@@ -18,6 +18,8 @@ import {
   X,
   Save,
   Loader2,
+  Bell,
+  Power,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useX402Wallet } from '@/hooks/use-x402-wallet'
@@ -57,6 +59,10 @@ interface AgentDetail {
   systemPrompt?: string
   starterPrompts?: string[]
   heartbeatIntervalHours?: number
+  heartbeatEnabled?: boolean
+  notifyOnPost?: boolean
+  notifyOnComment?: boolean
+  notifyOnUpvote?: boolean
   moltbook?: {
     moltbookAgentId?: string
     moltbookStatus?: string
@@ -184,6 +190,10 @@ export default function AgentDetailPage() {
   const [editDescription, setEditDescription] = useState('')
   const [editSystemPrompt, setEditSystemPrompt] = useState('')
   const [editHeartbeat, setEditHeartbeat] = useState(6)
+  const [editHeartbeatEnabled, setEditHeartbeatEnabled] = useState(true)
+  const [editNotifyOnPost, setEditNotifyOnPost] = useState(true)
+  const [editNotifyOnComment, setEditNotifyOnComment] = useState(true)
+  const [editNotifyOnUpvote, setEditNotifyOnUpvote] = useState(true)
 
   const { data: agent, error, isLoading, mutate } = useSWR<AgentDetail>(
     agentId ? `${GATEWAY_URL}/api/v1/agents/${agentId}` : null,
@@ -210,6 +220,10 @@ export default function AgentDetailPage() {
     setEditDescription(agent.description)
     setEditSystemPrompt(agent.systemPrompt ?? '')
     setEditHeartbeat(agent.heartbeatIntervalHours ?? 6)
+    setEditHeartbeatEnabled(agent.heartbeatEnabled !== false)
+    setEditNotifyOnPost(agent.notifyOnPost !== false)
+    setEditNotifyOnComment(agent.notifyOnComment !== false)
+    setEditNotifyOnUpvote(agent.notifyOnUpvote !== false)
     setEditing(true)
     setPromptOpen(true) // Expand system prompt when editing
   }, [agent])
@@ -239,6 +253,18 @@ export default function AgentDetailPage() {
       }
       if (editHeartbeat !== (agent.heartbeatIntervalHours ?? 6)) {
         updates.heartbeatIntervalHours = editHeartbeat
+      }
+      if (editHeartbeatEnabled !== (agent.heartbeatEnabled !== false)) {
+        updates.heartbeatEnabled = editHeartbeatEnabled
+      }
+      if (editNotifyOnPost !== (agent.notifyOnPost !== false)) {
+        updates.notifyOnPost = editNotifyOnPost
+      }
+      if (editNotifyOnComment !== (agent.notifyOnComment !== false)) {
+        updates.notifyOnComment = editNotifyOnComment
+      }
+      if (editNotifyOnUpvote !== (agent.notifyOnUpvote !== false)) {
+        updates.notifyOnUpvote = editNotifyOnUpvote
       }
 
       if (Object.keys(updates).length === 0) {
@@ -576,29 +602,68 @@ export default function AgentDetailPage() {
           </h2>
 
           {editing ? (
-            <div className="space-y-3">
-              <label className="text-xs text-muted-foreground">
-                How often should the agent browse Moltbook, engage with posts, and create content?
+            <div className="space-y-4">
+              {/* Enable/Disable toggle */}
+              <label className="flex items-center gap-3 cursor-pointer">
+                <button
+                  type="button"
+                  onClick={() => setEditHeartbeatEnabled(!editHeartbeatEnabled)}
+                  className={`relative inline-flex h-5 w-9 shrink-0 rounded-full border transition-colors ${
+                    editHeartbeatEnabled
+                      ? 'bg-emerald-500 border-emerald-500'
+                      : 'bg-muted border-border'
+                  }`}
+                >
+                  <span
+                    className={`inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${
+                      editHeartbeatEnabled ? 'translate-x-4' : 'translate-x-0.5'
+                    } mt-[1px]`}
+                  />
+                </button>
+                <span className="text-sm font-medium">
+                  {editHeartbeatEnabled ? 'Heartbeat enabled' : 'Heartbeat paused'}
+                </span>
               </label>
-              <div className="flex items-center gap-2 flex-wrap">
-                {HEARTBEAT_OPTIONS.map((opt) => (
-                  <button
-                    key={opt.label}
-                    type="button"
-                    onClick={() => setEditHeartbeat(opt.value)}
-                    className={`h-8 px-3 text-xs font-mono font-bold rounded-md border transition-colors ${
-                      Math.abs(editHeartbeat - opt.value) < 0.001
-                        ? 'border-primary bg-primary/10 text-primary'
-                        : 'border-border text-muted-foreground hover:border-foreground hover:text-foreground'
-                    }`}
-                  >
-                    {opt.label}
-                  </button>
-                ))}
+
+              {/* Interval selector */}
+              <div className="space-y-2">
+                <label className="text-xs text-muted-foreground">
+                  How often should the agent browse Moltbook, engage with posts, and create content?
+                </label>
+                <div className="flex items-center gap-2 flex-wrap">
+                  {HEARTBEAT_OPTIONS.map((opt) => (
+                    <button
+                      key={opt.label}
+                      type="button"
+                      onClick={() => setEditHeartbeat(opt.value)}
+                      disabled={!editHeartbeatEnabled}
+                      className={`h-8 px-3 text-xs font-mono font-bold rounded-md border transition-colors disabled:opacity-40 ${
+                        Math.abs(editHeartbeat - opt.value) < 0.001
+                          ? 'border-primary bg-primary/10 text-primary'
+                          : 'border-border text-muted-foreground hover:border-foreground hover:text-foreground'
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
           ) : (
             <div className="flex items-center gap-3 text-sm">
+              <span className="text-muted-foreground">Status:</span>
+              {agent.heartbeatEnabled !== false ? (
+                <span className="inline-flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400 font-mono font-bold text-xs">
+                  <Power className="h-3 w-3" />
+                  Active
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1.5 text-muted-foreground font-mono font-bold text-xs">
+                  <Power className="h-3 w-3" />
+                  Paused
+                </span>
+              )}
+              <span className="text-muted-foreground mx-1">|</span>
               <span className="text-muted-foreground">Interval:</span>
               <span className="font-mono font-bold">
                 Every {(heartbeatHours ?? 6) >= 1
@@ -610,6 +675,68 @@ export default function AgentDetailPage() {
                   Testing mode
                 </span>
               )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Notification Preferences ──────────────────────────────────── */}
+      {agent.moltbookName && isOwner && (
+        <div className="rounded-xl border border-border bg-card p-6 space-y-4">
+          <h2 className="text-[10px] font-mono font-bold uppercase tracking-widest text-muted-foreground">
+            <span className="inline-flex items-center gap-1">
+              <Bell className="h-3 w-3" />
+              Notification Preferences
+            </span>
+          </h2>
+
+          {editing ? (
+            <div className="space-y-3">
+              <p className="text-xs text-muted-foreground">
+                Choose which agent activities trigger Telegram notifications.
+              </p>
+              {([
+                { label: 'Notify on posts', key: 'post' as const, state: editNotifyOnPost, setter: setEditNotifyOnPost },
+                { label: 'Notify on comments', key: 'comment' as const, state: editNotifyOnComment, setter: setEditNotifyOnComment },
+                { label: 'Notify on upvotes', key: 'upvote' as const, state: editNotifyOnUpvote, setter: setEditNotifyOnUpvote },
+              ]).map(({ label, key, state, setter }) => (
+                <label key={key} className="flex items-center gap-3 cursor-pointer">
+                  <button
+                    type="button"
+                    onClick={() => setter(!state)}
+                    className={`relative inline-flex h-5 w-9 shrink-0 rounded-full border transition-colors ${
+                      state
+                        ? 'bg-primary border-primary'
+                        : 'bg-muted border-border'
+                    }`}
+                  >
+                    <span
+                      className={`inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${
+                        state ? 'translate-x-4' : 'translate-x-0.5'
+                      } mt-[1px]`}
+                    />
+                  </button>
+                  <span className="text-sm">{label}</span>
+                </label>
+              ))}
+            </div>
+          ) : (
+            <div className="flex items-center gap-4 flex-wrap text-xs">
+              {([
+                { label: 'Posts', enabled: agent.notifyOnPost !== false },
+                { label: 'Comments', enabled: agent.notifyOnComment !== false },
+                { label: 'Upvotes', enabled: agent.notifyOnUpvote !== false },
+              ]).map(({ label, enabled }) => (
+                <span
+                  key={label}
+                  className={`inline-flex items-center gap-1.5 font-mono ${
+                    enabled ? 'text-foreground' : 'text-muted-foreground/50 line-through'
+                  }`}
+                >
+                  <span className={`h-1.5 w-1.5 rounded-full ${enabled ? 'bg-primary' : 'bg-muted-foreground/30'}`} />
+                  {label}
+                </span>
+              ))}
             </div>
           )}
         </div>

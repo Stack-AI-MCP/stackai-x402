@@ -20,6 +20,10 @@ export interface AgentConfig {
   systemPrompt?: string
   starterPrompts?: string[]
   heartbeatIntervalHours?: number
+  heartbeatEnabled?: boolean
+  notifyOnPost?: boolean
+  notifyOnComment?: boolean
+  notifyOnUpvote?: boolean
   network: 'mainnet' | 'testnet'
   createdAt: string
   updatedAt: string
@@ -34,6 +38,9 @@ export interface CreateAgentInput {
   systemPrompt?: string
   starterPrompts?: string[]
   heartbeatIntervalHours?: number
+  notifyOnPost?: boolean
+  notifyOnComment?: boolean
+  notifyOnUpvote?: boolean
   network?: 'mainnet' | 'testnet'
 }
 
@@ -99,6 +106,9 @@ export async function createAgent(
     ...(input.systemPrompt && { systemPrompt: input.systemPrompt }),
     ...(input.starterPrompts?.length && { starterPrompts: input.starterPrompts }),
     ...(input.heartbeatIntervalHours && { heartbeatIntervalHours: input.heartbeatIntervalHours }),
+    ...(input.notifyOnPost !== undefined && { notifyOnPost: input.notifyOnPost }),
+    ...(input.notifyOnComment !== undefined && { notifyOnComment: input.notifyOnComment }),
+    ...(input.notifyOnUpvote !== undefined && { notifyOnUpvote: input.notifyOnUpvote }),
   }
 
   await Promise.all([
@@ -159,7 +169,7 @@ export async function listAgents(
 
 export async function updateAgent(
   agentId: string,
-  updates: Partial<Pick<AgentConfig, 'name' | 'description' | 'tools' | 'moltbookName' | 'moltbookAgentId' | 'systemPrompt' | 'starterPrompts' | 'heartbeatIntervalHours'>>,
+  updates: Partial<Pick<AgentConfig, 'name' | 'description' | 'tools' | 'moltbookName' | 'moltbookAgentId' | 'systemPrompt' | 'starterPrompts' | 'heartbeatIntervalHours' | 'heartbeatEnabled' | 'notifyOnPost' | 'notifyOnComment' | 'notifyOnUpvote'>>,
   deps: { redis: RedisLike },
 ): Promise<AgentConfig | null> {
   const existing = await getAgent(agentId, deps)

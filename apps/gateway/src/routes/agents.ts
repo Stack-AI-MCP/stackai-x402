@@ -30,6 +30,9 @@ const CreateAgentSchema = z.object({
   systemPrompt: z.string().optional(),
   starterPrompts: z.array(z.string()).optional(),
   network: z.enum(['mainnet', 'testnet']).default('mainnet'),
+  notifyOnPost: z.boolean().optional(),
+  notifyOnComment: z.boolean().optional(),
+  notifyOnUpvote: z.boolean().optional(),
   // Auth
   signature: z.string().optional(),
   publicKey: z.string().optional(),
@@ -44,6 +47,10 @@ const UpdateAgentSchema = z.object({
   systemPrompt: z.string().optional(),
   starterPrompts: z.array(z.string()).optional(),
   heartbeatIntervalHours: z.number().min(0.01).max(24).optional(),
+  heartbeatEnabled: z.boolean().optional(),
+  notifyOnPost: z.boolean().optional(),
+  notifyOnComment: z.boolean().optional(),
+  notifyOnUpvote: z.boolean().optional(),
   // Auth
   signature: z.string().optional(),
   publicKey: z.string().optional(),

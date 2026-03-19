@@ -7,9 +7,18 @@ import { createNotificationWorker } from './workers/notification.worker.js'
 import { closeNotificationQueue, enqueueErrorRateAlert } from './services/notification.service.js'
 import { LoggingHook, X402MonetizationHook, AnalyticsHook } from 'stackai-x402/hooks'
 import { createTelegramBot } from './lib/telegram-bot.js'
+import { startPriceRefresh } from './services/price.service.js'
 
 const config = parseConfig()
 const redis = getRedis()
+
+// Mutable prices object — mutated in-place by startPriceRefresh so every
+// request automatically gets the latest values via the Hono middleware.
+const tokenPrices = {
+  STX: config.TOKEN_PRICE_STX,
+  sBTC: config.TOKEN_PRICE_SBTC,
+  USDCx: config.TOKEN_PRICE_USDCX,
+}
 
 // ioredis Redis satisfies RedisLike at runtime; the TS mismatch on `scan`
 // is a pre-existing issue (ioredis vs bullmq version skew). We cast only
@@ -19,11 +28,7 @@ export const app = createApp({
   encryptionKey: config.GATEWAY_ENCRYPTION_KEY,
   relayUrl: config.RELAY_URL,
   testnetRelayUrl: config.TESTNET_RELAY_URL,
-  tokenPrices: {
-    STX: config.TOKEN_PRICE_STX,
-    sBTC: config.TOKEN_PRICE_SBTC,
-    USDCx: config.TOKEN_PRICE_USDCX,
-  },
+  tokenPrices,
   hooks: [
     new LoggingHook(),
     new X402MonetizationHook(),
@@ -46,6 +51,9 @@ if (process.env.NODE_ENV !== 'test') {
     telegramBotToken: config.TELEGRAM_BOT_TOKEN,
   })
 
+  // Live price feed — fetches from CoinGecko on startup then every 5 minutes
+  const stopPriceRefresh = startPriceRefresh(tokenPrices)
+
   // Start Telegram bot long-polling for incoming /start commands
   let telegramBot: ReturnType<typeof createTelegramBot> | null = null
   if (config.TELEGRAM_BOT_TOKEN) {
@@ -54,6 +62,7 @@ if (process.env.NODE_ENV !== 'test') {
   }
 
   const shutdown = async () => {
+    stopPriceRefresh()
     if (telegramBot) await telegramBot.stop()
     await notificationHandle.close()
     await closeNotificationQueue()

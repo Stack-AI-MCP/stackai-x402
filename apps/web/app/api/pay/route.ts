@@ -49,7 +49,7 @@ export async function POST(request: Request) {
   }
 
   if (!proxyRes.ok) {
-    const errBody = await proxyRes.json().catch(() => ({}))
+    const errBody = await proxyRes.text().then((t) => { try { return JSON.parse(t) } catch { return {} } })
     return new Response(
       JSON.stringify({
         error: errBody.error ?? `Payment failed (${proxyRes.status})`,
@@ -60,7 +60,16 @@ export async function POST(request: Request) {
     )
   }
 
-  const toolResult = await proxyRes.json()
+  const contentType = proxyRes.headers.get('content-type') ?? ''
+  let toolResult: unknown
+  if (contentType.includes('text/event-stream')) {
+    // MCP servers can respond with SSE: extract the first `data:` line
+    const text = await proxyRes.text()
+    const dataLine = text.split('\n').find((l) => l.startsWith('data:'))
+    toolResult = dataLine ? JSON.parse(dataLine.slice(5).trim()) : { raw: text }
+  } else {
+    toolResult = await proxyRes.json()
+  }
   return new Response(
     JSON.stringify({ txid, toolResult }),
     { status: 200, headers: { 'Content-Type': 'application/json' } },

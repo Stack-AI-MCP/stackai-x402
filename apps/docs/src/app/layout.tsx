@@ -36,7 +36,7 @@ const navbar = (
         <span style={{ fontWeight: 600 }}>Docs</span>
       </span>
     }
-    projectLink="https://github.com/aibtcdev/stackai-x402"
+    projectLink="https://github.com/Stack-AI-MCP/stackai-x402"
   />
 )
 
@@ -69,7 +69,7 @@ export default async function RootLayout({ children }: RootLayoutProps) {
           navbar={navbar}
           footer={footer}
           editLink="Edit this page on GitHub"
-          docsRepositoryBase="https://github.com/aibtcdev/stackai-x402/tree/main/apps/docs/src/content"
+          docsRepositoryBase="https://github.com/Stack-AI-MCP/stackai-x402/tree/main/apps/docs/src/content"
           sidebar={{ defaultMenuCollapseLevel: 1 }}
           pageMap={pageMap}
         >

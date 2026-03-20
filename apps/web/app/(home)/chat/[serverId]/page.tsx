@@ -4,7 +4,7 @@ import { useParams, useSearchParams } from 'next/navigation'
 import { useChat } from '@ai-sdk/react'
 import { DefaultChatTransport } from 'ai'
 import { Suspense, useState, useRef, useEffect, useCallback, useMemo } from 'react'
-import { Loader2, Bot, User, Wrench, CheckCircle2, ChevronDown, ChevronUp } from 'lucide-react'
+import { Loader2, Bot, CheckCircle2 } from 'lucide-react'
 import { request } from '@stacks/connect'
 import { ModelSelector, DEFAULT_MODEL } from '@/components/x402/ModelSelector'
 import { ChatInput } from '@/components/x402/ChatInput'
@@ -16,6 +16,10 @@ import {
 import { useX402Wallet } from '@/hooks/use-x402-wallet'
 import { buildUnsignedPaymentTx, broadcastSignedTx } from '@/lib/x402/build-payment-tx'
 import type { AgentConfig } from '@/components/x402/AgentComposer'
+import { ChatMessage, ChatMessageText } from '@/components/chat/chat-message'
+import { ChatMessages } from '@/components/chat/chat-messages'
+import { ChatEmptyState } from '@/components/chat/chat-empty-state'
+import { ToolResult, ToolCallCard } from '@/components/chat/chat-tool-result'
 
 interface PaymentStatusEntry {
   status: PaymentStatus
@@ -36,32 +40,6 @@ function isPaymentOutput(output: unknown): output is {
     typeof output === 'object' &&
     output !== null &&
     (output as Record<string, unknown>).__paymentRequired === true
-  )
-}
-
-// Collapsible tool result component — works for any MCP output shape
-function ToolResult({ output }: { output: unknown }) {
-  const [expanded, setExpanded] = useState(false)
-  const formatted =
-    typeof output === 'string' ? output : JSON.stringify(output, null, 2)
-  const lines = formatted.split('\n')
-  const isLong = lines.length > 6
-
-  return (
-    <div className="mt-2">
-      <pre className={`whitespace-pre-wrap text-xs text-muted-foreground leading-relaxed overflow-auto rounded-lg bg-background/60 p-2 ${isLong && !expanded ? 'max-h-[7rem]' : 'max-h-[32rem]'}`}>
-        {formatted}
-      </pre>
-      {isLong && (
-        <button
-          onClick={() => setExpanded((v) => !v)}
-          className="mt-1 flex items-center gap-1 text-[10px] font-mono text-muted-foreground hover:text-foreground transition-colors"
-        >
-          {expanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-          {expanded ? 'collapse' : `show ${lines.length - 6} more lines`}
-        </button>
-      )}
-    </div>
   )
 }
 
@@ -91,7 +69,6 @@ function ChatPageInner() {
     const encoded = searchParams.get('agent')
     if (!encoded) return null
     try {
-      // Unicode-safe base64 decode: base64 → binary string → UTF-8 bytes → JSON
       const binStr = atob(encoded)
       const bytes = Uint8Array.from(binStr, (c) => c.charCodeAt(0))
       return JSON.parse(new TextDecoder().decode(bytes)) as AgentConfig
@@ -154,7 +131,6 @@ function ChatPageInner() {
         return
       }
 
-      // Find the selected accept option from the V2 accepts array
       const selectedAccept = paymentData.payment.accepts.find((a) => a.asset === tokenType)
         ?? paymentData.payment.accepts[0]
       if (!selectedAccept) {
@@ -171,7 +147,6 @@ function ChatPageInner() {
       }))
 
       try {
-        // Get the verified signing public key (prompts wallet via stx_signMessage if not cached).
         let signingKey: string
         try {
           signingKey = await wallet.getSigningPublicKey()
@@ -183,7 +158,6 @@ function ChatPageInner() {
           return
         }
 
-        // Build unsigned tx with auto fee estimation
         let unsignedHex: string
         try {
           unsignedHex = await buildUnsignedPaymentTx({
@@ -194,7 +168,7 @@ function ChatPageInner() {
             tokenType,
             network: selectedAccept.network,
           })
-        } catch (buildErr) {
+        } catch {
           setPaymentStatuses((prev) => ({
             ...prev,
             [toolCallId]: {
@@ -205,7 +179,6 @@ function ChatPageInner() {
           return
         }
 
-        // Wallet signs (broadcast: false) — we broadcast ourselves to get a real txid
         let signedHex: string
         try {
           const signResult = await request('stx_signTransaction', {
@@ -221,7 +194,6 @@ function ChatPageInner() {
           return
         }
 
-        // Broadcast to Stacks network via Hiro API to get the real txid
         let txid: string
         try {
           txid = await broadcastSignedTx(signedHex, selectedAccept.network)
@@ -241,11 +213,9 @@ function ChatPageInner() {
           [toolCallId]: { status: 'approved' },
         }))
 
-        // Build V2 payment-signature with the real txid — gateway verifies via Hiro API
         const payloadV2 = { x402Version: 2, accepted: selectedAccept, payload: { txid } }
         const paymentSignature = btoa(JSON.stringify(payloadV2))
 
-        // Send payment-signature to gateway via our pay API route
         const payRes = await fetch('/api/pay', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -259,7 +229,6 @@ function ChatPageInner() {
 
         const result = await payRes.json()
         if (!payRes.ok) {
-          // Wire error code from gateway (AC1: NETWORK_MISMATCH, AMOUNT_MISMATCH, etc.)
           setPaymentStatuses((prev) => ({
             ...prev,
             [toolCallId]: {
@@ -282,8 +251,6 @@ function ChatPageInner() {
 
         wallet.refreshBalances()
 
-        // Auto-continue: feed the real tool result back to the AI so it can respond naturally.
-        // The system prompt instructs the AI to parse __paid_continue__ and answer directly.
         if (result.toolResult !== undefined) {
           const continuationText = `__paid_continue__ ${JSON.stringify({
             toolName: paymentData.toolName,
@@ -295,7 +262,6 @@ function ChatPageInner() {
           })
         }
       } catch (err) {
-        // Unexpected error (tx building, network, etc.)
         setPaymentStatuses((prev) => ({
           ...prev,
           [toolCallId]: {
@@ -337,206 +303,154 @@ function ChatPageInner() {
   const activeStarterPrompts =
     agentConfig?.starterPrompts?.length ? agentConfig.starterPrompts : defaultStarterPrompts
 
+  const displayName = agentConfig?.name ?? serverName ?? 'Chat'
+
   return (
-    <div className="flex h-[calc(100vh-8rem)] flex-col">
+    <div className="flex flex-col h-[calc(100dvh-6.5rem)]">
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-border pb-3 shrink-0">
+      <div className="flex items-center justify-between border-b border-border px-4 py-3 shrink-0">
         <div>
-          <h1 className="text-lg font-semibold">
-            {agentConfig?.name ?? serverName ?? 'Chat'}
-          </h1>
-          <p className="text-xs text-muted-foreground">Server: {serverId}</p>
+          <h1 className="text-lg font-semibold">{displayName}</h1>
+          <p className="text-xs text-muted-foreground font-mono">Server: {serverId}</p>
         </div>
       </div>
 
       {/* Messages — min-h-0 is critical so flex child can scroll */}
-      <div className="flex-1 overflow-y-auto min-h-0">
+      <div className="flex-1 overflow-y-auto min-h-0 px-4">
         {messages.length === 0 ? (
-          <div className="h-full flex flex-col items-center justify-center gap-8 px-4">
-            {/* Empty state hero */}
-            <div className="text-center space-y-2">
-              <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center mx-auto">
-                <Bot className="h-6 w-6 text-primary" />
-              </div>
-              <h2 className="font-semibold">
-                {agentConfig?.name ?? serverName ?? 'Chat'}
-              </h2>
-              <p className="text-sm text-muted-foreground max-w-sm">
-                Ask anything — free tools run instantly, paid tools show a payment prompt before executing.
-              </p>
-            </div>
-            {/* Starter prompts grid */}
-            <div className="grid grid-cols-2 gap-2 w-full max-w-lg">
-              {activeStarterPrompts.map((prompt) => (
-                <button
-                  key={prompt}
-                  type="button"
-                  disabled={isLoading}
-                  onClick={() => {
-                    setInput('')
-                    sendMessage({
-                      role: 'user' as const,
-                      parts: [{ type: 'text' as const, text: prompt }],
-                    })
-                  }}
-                  className="rounded-xl border border-border bg-card/50 p-3 text-left text-xs hover:border-primary/40 hover:bg-card card-glow disabled:opacity-50"
-                >
-                  {prompt}
-                </button>
-              ))}
-            </div>
-          </div>
+          <ChatEmptyState
+            title={displayName}
+            starterPrompts={activeStarterPrompts}
+            isLoading={isLoading}
+            onSelectPrompt={(prompt) => {
+              setInput('')
+              sendMessage({
+                role: 'user' as const,
+                parts: [{ type: 'text' as const, text: prompt }],
+              })
+            }}
+          />
         ) : null}
 
-        <div className="space-y-4 py-4">
+        <ChatMessages>
           {messages.map((message) => (
-            <div key={message.id} className="flex gap-3">
-              <div
-                className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${
-                  message.role === 'user'
-                    ? 'bg-primary/10 text-primary'
-                    : 'bg-muted text-muted-foreground'
-                }`}
-              >
-                {message.role === 'user' ? (
-                  <User className="h-4 w-4" />
-                ) : (
-                  <Bot className="h-4 w-4" />
-                )}
-              </div>
-
-              <div className="min-w-0 flex-1 space-y-2">
-                {message.parts?.map((part, i) => {
-                  if (part.type === 'text') {
-                    // Hide __paid_continue__ messages from the visible chat —
-                    // show a compact "payment settled" chip instead
-                    if (part.text.startsWith('__paid_continue__')) {
-                      return (
-                        <div
-                          key={`sys-${i}`}
-                          className="inline-flex items-center gap-1.5 rounded-full bg-teal-500/10 px-3 py-1 text-[11px] font-mono text-teal-500"
-                        >
-                          <CheckCircle2 className="h-3 w-3" />
-                          payment settled — processing result…
-                        </div>
-                      )
-                    }
-                    return (
-                      <div key={`text-${i}`} className="whitespace-pre-wrap text-sm leading-relaxed">
-                        {part.text}
-                      </div>
-                    )
-                  }
-
-                  // Tool parts follow `tool-{name}` pattern
-                  if (part.type.startsWith('tool-')) {
-                    const toolName = part.type.replace(/^tool-/, '')
-                    const toolCallId =
-                      'toolCallId' in part ? (part.toolCallId as string) : `tool-${i}`
-                    const state = 'state' in part ? (part.state as string) : ''
-                    const isRunning =
-                      state === 'input-available' || state === 'input-streaming'
-                    const hasOutput = state === 'output-available' && 'output' in part
-                    const hasError = state === 'output-error' && 'errorText' in part
-                    const isUnknown = !isRunning && !hasOutput && !hasError && state !== ''
-
+            <ChatMessage key={message.id} role={message.role as 'user' | 'assistant'}>
+              {message.parts?.map((part, i) => {
+                if (part.type === 'text') {
+                  if (part.text.startsWith('__paid_continue__')) {
                     return (
                       <div
-                        key={toolCallId}
-                        className="rounded-xl border border-border bg-muted/20 p-3"
+                        key={`sys-${i}`}
+                        className="inline-flex items-center gap-1.5 rounded-full bg-teal-500/10 px-3 py-1 text-[11px] font-mono text-teal-500"
                       >
-                        <div className="flex items-center gap-2 text-xs font-mono font-medium text-muted-foreground">
-                          <Wrench className="h-3 w-3 text-primary/60" />
-                          <span className="text-primary/80">{toolName}</span>
-                          {isRunning && (
-                            <>
-                              <Loader2 className="h-3 w-3 animate-spin" />
-                              <span className="text-[10px]">running…</span>
-                            </>
-                          )}
-                        </div>
-
-                        {hasOutput && (() => {
-                          const output = (part as { output: unknown }).output
-                          if (isPaymentOutput(output)) {
-                            const entry = paymentStatuses[toolCallId]
-                            return (
-                              <div className="mt-2">
-                                <PaymentCard
-                                  toolName={output.toolName}
-                                  payment={output.payment}
-                                  status={entry?.status ?? 'pending'}
-                                  error={entry?.error}
-                                  errorCode={entry?.errorCode}
-                                  txid={entry?.txid}
-                                  onApprove={(token) =>
-                                    handlePaymentApprove(toolCallId, output, token)
-                                  }
-                                  onReject={() => handlePaymentReject(toolCallId)}
-                                />
-                              </div>
-                            )
-                          }
-                          // Free tool result — collapsible JSON viewer
-                          return <ToolResult output={output} />
-                        })()}
-
-                        {hasError && (
-                          <div className="mt-2 text-xs text-destructive">
-                            {(part as { errorText: string }).errorText}
-                          </div>
-                        )}
-
-                        {isUnknown && (
-                          <div className="mt-2 text-xs text-muted-foreground">
-                            Tool timed out or returned no result.
-                          </div>
-                        )}
+                        <CheckCircle2 className="h-3 w-3" />
+                        payment settled — processing result…
                       </div>
                     )
                   }
+                  return (
+                    <ChatMessageText
+                      key={`text-${i}`}
+                      text={part.text}
+                      role={message.role as 'user' | 'assistant'}
+                    />
+                  )
+                }
 
-                  return null
-                })}
-              </div>
-            </div>
+                if (part.type.startsWith('tool-')) {
+                  const toolName = part.type.replace(/^tool-/, '')
+                  const toolCallId =
+                    'toolCallId' in part ? (part.toolCallId as string) : `tool-${i}`
+                  const state = 'state' in part ? (part.state as string) : ''
+                  const isRunning =
+                    state === 'input-available' || state === 'input-streaming'
+                  const hasOutput = state === 'output-available' && 'output' in part
+                  const hasError = state === 'output-error' && 'errorText' in part
+                  const isUnknown = !isRunning && !hasOutput && !hasError && state !== ''
+
+                  return (
+                    <ToolCallCard key={toolCallId} toolName={toolName} isRunning={isRunning}>
+                      {hasOutput && (() => {
+                        const output = (part as { output: unknown }).output
+                        if (isPaymentOutput(output)) {
+                          const entry = paymentStatuses[toolCallId]
+                          return (
+                            <div className="mt-2">
+                              <PaymentCard
+                                toolName={output.toolName}
+                                payment={output.payment}
+                                status={entry?.status ?? 'pending'}
+                                error={entry?.error}
+                                errorCode={entry?.errorCode}
+                                txid={entry?.txid}
+                                onApprove={(token) =>
+                                  handlePaymentApprove(toolCallId, output, token)
+                                }
+                                onReject={() => handlePaymentReject(toolCallId)}
+                              />
+                            </div>
+                          )
+                        }
+                        return <ToolResult output={output} />
+                      })()}
+
+                      {hasError && (
+                        <div className="mt-2 text-xs text-destructive">
+                          {(part as { errorText: string }).errorText}
+                        </div>
+                      )}
+
+                      {isUnknown && (
+                        <div className="mt-2 text-xs text-muted-foreground">
+                          Tool timed out or returned no result.
+                        </div>
+                      )}
+                    </ToolCallCard>
+                  )
+                }
+
+                return null
+              })}
+            </ChatMessage>
           ))}
 
           {isLoading && messages[messages.length - 1]?.role !== 'assistant' && (
-            <div className="flex gap-3">
-              <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
-                <Bot className="h-4 w-4" />
-              </div>
+            <ChatMessage role="assistant">
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <Loader2 className="h-4 w-4 animate-spin" />
                 Thinking...
               </div>
-            </div>
+            </ChatMessage>
           )}
 
           <div ref={messagesEndRef} />
-        </div>
+        </ChatMessages>
       </div>
 
       {/* Error */}
       {error && (
-        <div className="mb-2 rounded-xl border border-destructive/50 bg-destructive/10 p-2 text-xs text-destructive shrink-0">
+        <div className="mx-4 mb-2 rounded-xl border border-destructive/50 bg-destructive/10 p-2 text-xs text-destructive shrink-0">
           {error.message}
         </div>
       )}
 
-      {/* Input area */}
-      <div className="shrink-0 space-y-2 border-t border-border pt-3">
-        <div className="flex items-center justify-end">
-          <ModelSelector value={model} onChange={setModel} />
+      {/* Input area with gradient fade */}
+      <div className="shrink-0 relative">
+        <div className="absolute -top-8 inset-x-0 h-8 bg-gradient-to-t from-background via-background to-transparent pointer-events-none" />
+        <div className="border-t border-border px-4 pt-3 pb-4 space-y-2">
+          <div className="max-w-3xl mx-auto space-y-2">
+            <ChatInput
+              value={input}
+              onChange={setInput}
+              onSubmit={handleSubmit}
+              isLoading={isLoading}
+              placeholder="Ask about Stacks DeFi, sBTC, ALEX…"
+            />
+            <div className="flex items-center justify-end">
+              <ModelSelector value={model} onChange={setModel} />
+            </div>
+          </div>
         </div>
-        <ChatInput
-          value={input}
-          onChange={setInput}
-          onSubmit={handleSubmit}
-          isLoading={isLoading}
-          placeholder="Ask about Stacks DeFi, sBTC, ALEX…"
-        />
       </div>
     </div>
   )

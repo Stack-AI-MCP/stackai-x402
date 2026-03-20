@@ -2,6 +2,8 @@
 
 x402 HTTP payment protocol implementation for Stacks Bitcoin L2. Enables AI agents and developers to monetize MCP tool calls with STX, sBTC, or USDCx payments -- no custodial intermediaries, no subscriptions, pay-per-call.
 
+![stackai-x402](apps/docs/public/images/landing-light.png)
+
 ## How x402 Works
 
 ```
@@ -34,8 +36,9 @@ Client                        Gateway                     MCP Server
 |---------|------|-------------|
 | [`stackai-x402`](packages/sdk/) | `packages/sdk/` | TypeScript SDK -- wallet generation, automatic 402 handling, agent management |
 | [`gateway`](apps/gateway/) | `apps/gateway/` | HTTP gateway -- MCP proxy with x402 payment enforcement, server registry |
-
-The companion [stackai-moltbook](../stackai-moltbook/) service handles promotional AI agents on the Moltbook social platform.
+| [`web`](apps/web/) | `apps/web/` | Next.js dashboard -- marketplace, chat, agent composer, analytics |
+| [`docs`](apps/docs/) | `apps/docs/` | Nextra documentation site |
+| [`moltbook`](apps/moltbook/) | `apps/moltbook/` | Promotional AI agent service for the Moltbook social platform |
 
 ## Quick Start
 
@@ -48,6 +51,9 @@ The companion [stackai-moltbook](../stackai-moltbook/) service handles promotion
 ### Install and Build
 
 ```bash
+git clone https://github.com/Stack-AI-MCP/stackai-x402.git
+cd stackai-x402
+
 pnpm install
 pnpm build          # builds SDK first, then gateway (turbo pipeline)
 pnpm test           # runs all tests
@@ -105,11 +111,20 @@ pnpm --filter gateway dev
 
 See the [Gateway README](apps/gateway/) for environment variables and API routes.
 
+### Running the Web Dashboard
+
+```bash
+pnpm --filter web dev
+```
+
+The dashboard runs at `http://localhost:3002`. Set `NEXT_PUBLIC_GATEWAY_URL` to point to your gateway.
+
 ## Development
 
 ```bash
 pnpm dev             # start all packages in watch mode
 pnpm --filter gateway dev    # gateway only
+pnpm --filter web dev        # web dashboard only
 pnpm --filter stackai-x402 build  # rebuild SDK
 ```
 
@@ -128,6 +143,21 @@ apps/gateway/src/
   routes/     HTTP routes (proxy, servers, agents, analytics, agent-card)
   services/   auth (signature verification), registration (Redis storage)
   config.ts   environment variable schema (Zod validated)
+
+apps/web/
+  app/        Next.js App Router (marketplace, chat, register, agents, analytics)
+  components/ UI components (landing, chat, agents, explorer, providers)
+  hooks/      wallet auth, x402 client hooks
+  lib/        utilities, x402 integration
+
+apps/moltbook/src/
+  ai/         LLM content generation (OpenAI, Anthropic, template)
+  moltbook/   Moltbook API client with challenge solver
+  scheduler/  Heartbeat engine (configurable intervals)
+  state/      Agent state management
+
+apps/docs/
+  src/content/  MDX documentation (guides, reference, getting started)
 ```
 
 ## Supported Tokens

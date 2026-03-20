@@ -96,7 +96,7 @@ export function DeveloperInfo() {
               <Link href="/register" className="flex-1">
                 <button className="btn-primary-tall w-full">Register (No Code)</button>
               </Link>
-              <a href="https://github.com/aibtcdev/stacks-ai" target="_blank" rel="noopener noreferrer" className="flex-1">
+              <a href="https://github.com/Stack-AI-MCP/stackai-x402" target="_blank" rel="noopener noreferrer" className="flex-1">
                 <button className="btn-secondary-tall w-full">View Source</button>
               </a>
             </div>
@@ -109,7 +109,7 @@ export function DeveloperInfo() {
             label="OPEN SOURCE"
             copy="Forever free. No fees. Developers can audit the entire code."
             ctaText="SOURCE CODE"
-            ctaHref="https://github.com/aibtcdev/stacks-ai"
+            ctaHref="https://github.com/Stack-AI-MCP/stackai-x402"
           />
           <InfoCard
             icon={ShieldCheck}

@@ -15,7 +15,7 @@ const productLinks = [
 ]
 
 const resourceLinks = [
-  { href: 'https://github.com/aibtcdev/stackai-x402', label: 'GITHUB', external: true },
+  { href: 'https://github.com/Stack-AI-MCP/stackai-x402', label: 'GITHUB', external: true },
   { href: 'https://stacksai.xyz',                      label: 'STACKSAI', external: true },
   { href: 'https://docs.stacks.co',                    label: 'STACKS DOCS', external: true },
 ]
@@ -47,7 +47,7 @@ export function Footer() {
             </p>
             <div className="flex items-center gap-3">
               <a
-                href="https://github.com/aibtcdev/stackai-x402"
+                href="https://github.com/Stack-AI-MCP/stackai-x402"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="flex items-center justify-center w-8 h-8 border border-border text-muted-foreground hover:text-foreground hover:border-primary/40 transition-colors"

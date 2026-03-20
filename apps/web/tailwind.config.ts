@@ -201,11 +201,26 @@ const config: Config = {
       animation: {
         'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
         'glow': 'glow 2s ease-in-out infinite alternate',
+        'pulse-glow': 'pulse-glow 2s ease-in-out infinite',
+        'shimmer': 'shimmer 2s linear infinite',
+        'slide-in-right': 'slide-in-right 0.4s ease-out both',
       },
       keyframes: {
         glow: {
           '0%': { boxShadow: '0 0 5px rgba(85, 70, 255, 0.2)' },
           '100%': { boxShadow: '0 0 20px rgba(85, 70, 255, 0.6)' },
+        },
+        'pulse-glow': {
+          '0%, 100%': { boxShadow: '0 0 8px rgba(249, 115, 22, 0.15)' },
+          '50%': { boxShadow: '0 0 24px rgba(249, 115, 22, 0.35)' },
+        },
+        shimmer: {
+          '0%': { backgroundPosition: '-200% 0' },
+          '100%': { backgroundPosition: '200% 0' },
+        },
+        'slide-in-right': {
+          from: { opacity: '0', transform: 'translateX(16px)' },
+          to: { opacity: '1', transform: 'translateX(0)' },
         },
       },
     },

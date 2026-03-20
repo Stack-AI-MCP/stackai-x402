@@ -10,24 +10,37 @@ import { ServerCard } from '@/components/x402/ServerCard'
 import { Check } from 'lucide-react'
 import Link from 'next/link'
 import useSWR from 'swr'
+import { motion, useInView } from 'motion/react'
+import { useRef } from 'react'
 
 const GATEWAY_URL = process.env.NEXT_PUBLIC_GATEWAY_URL ?? 'http://localhost:3001'
 const fetcher = (url: string) => fetch(url).then(r => r.json()).then(d => d.servers ?? [])
 
+const STATS = [
+  { value: '$0.00', label: 'Setup Fee' },
+  { value: '1.0%',  label: 'Protocol Fee' },
+  { value: '3',     label: 'Payment Tokens' },
+  { value: '∞',     label: 'Scalability' },
+]
+
 function StatsSection() {
+  const ref = useRef<HTMLElement>(null)
+  const isInView = useInView(ref, { once: true, margin: '-100px' })
+
   return (
-    <section className="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8 py-16 border-y border-border/50">
+    <section ref={ref} className="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8 py-16 border-y border-border/50">
       <div className="grid grid-cols-2 md:grid-cols-4 gap-8 text-center">
-        {[
-          { value: '$0.00', label: 'Setup Fee' },
-          { value: '1.0%',  label: 'Protocol Fee' },
-          { value: '3',     label: 'Payment Tokens' },
-          { value: '∞',     label: 'Scalability' },
-        ].map(({ value, label }) => (
-          <div key={label} className="space-y-2">
+        {STATS.map(({ value, label }, i) => (
+          <motion.div
+            key={label}
+            initial={{ opacity: 0, y: 20 }}
+            animate={isInView ? { opacity: 1, y: 0 } : {}}
+            transition={{ duration: 0.5, delay: i * 0.1 }}
+            className="space-y-2"
+          >
             <div className="text-3xl sm:text-4xl font-bold font-mono text-foreground">{value}</div>
             <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-muted-foreground">{label}</p>
-          </div>
+          </motion.div>
         ))}
       </div>
     </section>
@@ -59,7 +72,7 @@ function GithubInfo() {
                 </div>
               ))}
             </div>
-            <a href="https://github.com/aibtcdev/stackai-x402" target="_blank" rel="noopener noreferrer" className="w-full lg:max-w-[280px]">
+            <a href="https://github.com/Stack-AI-MCP/stackai-x402" target="_blank" rel="noopener noreferrer" className="w-full lg:max-w-[280px]">
               <button className="btn-primary-tall w-full">STAR ON GITHUB</button>
             </a>
           </div>

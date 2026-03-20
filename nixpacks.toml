@@ -1,0 +1,35 @@
+# stackai-x402 monorepo — Nixpacks build config for Coolify
+#
+# Set the APP_NAME environment variable in Coolify per service:
+#   gateway  → APP_NAME=gateway
+#   web      → APP_NAME=stackai-x402-web
+#   docs     → APP_NAME=stackai-x402-docs
+#   moltbook → APP_NAME=moltbook
+#
+# IMPORTANT: In Coolify, set "Base Directory" to / (repo root), NOT apps/<name>.
+
+# Install phase — include all workspace package.json files for pnpm resolution
+[phases.install]
+cmds = ["pnpm install --frozen-lockfile"]
+cacheDirectories = ["node_modules", ".pnpm-store"]
+onlyIncludeFiles = [
+  "package.json",
+  "pnpm-lock.yaml",
+  "pnpm-workspace.yaml",
+  "turbo.json",
+  "apps/gateway/package.json",
+  "apps/web/package.json",
+  "apps/docs/package.json",
+  "apps/moltbook/package.json",
+  "packages/sdk/package.json",
+  "packages/eslint-config/package.json"
+]
+
+# Build phase — turbo builds the target app + its workspace deps (topological)
+[phases.build]
+dependsOn = ["install"]
+cmds = ["pnpm turbo build --filter=${APP_NAME:-gateway}"]
+
+# Start — runs the target app's start script
+[start]
+cmd = "pnpm --filter ${APP_NAME:-gateway} start"

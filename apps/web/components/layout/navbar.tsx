@@ -43,7 +43,7 @@ export function GlobalNavbar() {
   // Close menu on route change
   useEffect(() => { setMenuOpen(false) }, [pathname])
 
-  const safeLogoSrc = '/images/stacks.png'
+  const safeLogoSrc = '/images/x402-icon.svg'
 
   const isActive = (href: string) =>
     href === '/' ? pathname === '/' : pathname === href || pathname.startsWith(href + '/')
@@ -62,26 +62,29 @@ export function GlobalNavbar() {
           {/* Left: Logo */}
           <div className="flex items-center">
             <Link href="/" className="flex items-center gap-2.5">
-              {/* Mobile: just icon */}
-              <div className="block lg:hidden">
+              {/* Mobile: icon + compact wordmark */}
+              <div className="flex lg:hidden items-center gap-2">
                 <Image
                   src={safeLogoSrc}
-                  alt="StacksAI"
-                  width={32}
-                  height={32}
-                  className="rounded-lg"
+                  alt="x402"
+                  width={28}
+                  height={23}
+                  className="dark:invert"
                 />
+                <span className="font-mono text-base font-bold tracking-wide text-foreground">
+                  x<span className="text-primary">402</span>
+                </span>
               </div>
               {/* Desktop: icon + wordmark */}
               <div className="hidden lg:flex items-center gap-2.5">
                 <Image
                   src={safeLogoSrc}
-                  alt="StacksAI"
-                  width={28}
-                  height={28}
-                  className="rounded-lg"
+                  alt="x402"
+                  width={32}
+                  height={26}
+                  className="dark:invert"
                 />
-                <span className="font-mono text-sm font-semibold tracking-wider text-foreground">
+                <span className="font-mono text-lg font-extrabold tracking-wide text-foreground">
                   x<span className="text-primary">402</span>
                 </span>
               </div>

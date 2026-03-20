@@ -25,6 +25,7 @@ import { TokenBadge } from '@/components/x402/TokenBadge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ToolRunnerModal, type ToolForRunner } from '@/components/x402/ToolRunnerModal'
 import { ServerFavicon } from '@/components/x402/ServerFavicon'
+import { ConnectPanel } from '@/components/x402/ConnectPanel'
 import { MoltbookBadge } from '@/components/moltbook-badge'
 import { ExplorerRow, type TransactionRecord } from '@/components/explorer/explorer-row'
 import { cn, formatRelative, formatDate } from '@/lib/utils/format'
@@ -330,43 +331,7 @@ export default function ServerDetailsPage() {
             </TabsContent>
 
             <TabsContent value="connect" className="pt-6">
-              <div className="rounded-xl border border-border bg-card/50 p-6 space-y-6">
-                <div className="space-y-2">
-                  <h3 className="text-lg font-semibold">Connect to your favorite MCP Client</h3>
-                  <p className="text-sm text-muted-foreground">Copy the gateway URL below to use this server in Claude Desktop or other MCP-compatible clients.</p>
-                </div>
-
-                <div className="space-y-4">
-                  <div className="space-y-2">
-                    <label className="text-xs font-mono uppercase tracking-widest text-muted-foreground">Gateway Endpoint</label>
-                    <div className="flex gap-2">
-                      <div className="flex-1 rounded-md bg-muted px-4 py-3 font-mono text-sm break-all">
-                        {`${GATEWAY_URL}/mcp?id=${serverId}`}
-                      </div>
-                      <button 
-                        onClick={() => {
-                          navigator.clipboard.writeText(`${GATEWAY_URL}/mcp?id=${serverId}`)
-                        }}
-                        className="shrink-0 rounded-md bg-secondary px-4 py-2 text-sm font-medium hover:bg-secondary/80 transition-colors"
-                      >
-                        Copy
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="rounded-lg bg-amber-500/5 border border-amber-500/20 p-4">
-                    <div className="flex gap-3">
-                      <Shield className="h-5 w-5 text-amber-600 shrink-0" />
-                      <div className="space-y-1">
-                        <p className="text-sm font-medium text-amber-800">Payment Authorization Required</p>
-                        <p className="text-xs text-amber-700/80 leading-relaxed">
-                          This endpoint requires x402 payment headers for paid tools. Ensure your MCP client supports x402 or use our web chat for seamless integration.
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
+              <ConnectPanel serverId={serverId} serverName={data.name} />
             </TabsContent>
           </Tabs>
         </div>

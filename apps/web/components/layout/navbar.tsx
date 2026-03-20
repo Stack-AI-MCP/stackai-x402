@@ -3,12 +3,14 @@
 import Link from 'next/link'
 import Image from 'next/image'
 import { usePathname } from 'next/navigation'
-import { Menu, Moon, Sun, X, Github, Terminal } from 'lucide-react'
+import { Menu, Moon, Sun, X, BookOpen } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { WalletButton } from '@/components/x402/WalletButton'
 import { useTheme } from '@/components/providers/theme-context'
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'motion/react'
+
+const DOCS_URL = 'https://x402-docs.stacks-ai.app/'
 
 const desktopLinks = [
   { href: '/marketplace',  label: 'BROWSE' },
@@ -101,15 +103,16 @@ export function GlobalNavbar() {
 
           {/* Right: actions */}
           <div className="flex items-center justify-end gap-1">
-            {/* GitHub — large desktop only */}
+            {/* Docs — large desktop only */}
             <a
-              href="https://github.com/Stack-AI-MCP/stackai-x402"
+              href={DOCS_URL}
               target="_blank"
               rel="noopener noreferrer"
-              className="hidden lg:flex h-8 w-8 items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
-              aria-label="GitHub"
+              className="hidden lg:flex h-8 items-center gap-1.5 px-2 font-mono text-[13px] tracking-wider text-muted-foreground hover:text-foreground transition-colors"
+              aria-label="Documentation"
             >
-              <Github className="h-4 w-4" />
+              <BookOpen className="h-3.5 w-3.5" />
+              DOCS
             </a>
 
             {/* Theme toggle — large desktop only */}
@@ -132,18 +135,6 @@ export function GlobalNavbar() {
             <div className="hidden sm:block">
               <WalletButton />
             </div>
-
-            {/* Terminal CTA — large desktop only */}
-            <Button
-              asChild
-              size="sm"
-              className="hidden lg:flex gap-1.5 bg-foreground text-background hover:bg-foreground/90 font-mono text-[11px] tracking-wider uppercase rounded-[2px]"
-            >
-              <Link href="/chat">
-                <Terminal className="h-3 w-3" />
-                Terminal
-              </Link>
-            </Button>
 
             {/* Hamburger menu — shown below lg */}
             <Button
@@ -187,25 +178,24 @@ export function GlobalNavbar() {
                 </Link>
               ))}
 
-              {/* Terminal CTA */}
-              <div className="pt-3 border-t border-border/50">
-                <Link href="/chat" onClick={() => setMenuOpen(false)}>
-                  <Button
-                    size="sm"
-                    className="w-full gap-1.5 bg-foreground text-background hover:bg-foreground/90 font-mono text-[11px] tracking-wider uppercase rounded-[2px]"
-                  >
-                    <Terminal className="h-3 w-3" />
-                    Terminal
-                  </Button>
-                </Link>
-              </div>
+              {/* Docs link */}
+              <a
+                href={DOCS_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={() => setMenuOpen(false)}
+                className="flex items-center gap-2 py-2 font-mono tracking-wide text-base text-muted-foreground hover:text-foreground"
+              >
+                <BookOpen className="h-4 w-4" />
+                DOCS
+              </a>
 
               {/* Wallet (visible on smallest screens via mobile menu) */}
               <div className="sm:hidden pt-3 border-t border-border/50">
                 <WalletButton />
               </div>
 
-              {/* Theme + GitHub */}
+              {/* Theme toggle */}
               <div className="flex items-center justify-center gap-3 pt-3">
                 <Button
                   variant="ghost"
@@ -219,15 +209,6 @@ export function GlobalNavbar() {
                     : <Moon className="h-5 w-5" />
                   }
                 </Button>
-                <a
-                  href="https://github.com/Stack-AI-MCP/stackai-x402"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex h-8 w-8 items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
-                  aria-label="GitHub"
-                >
-                  <Github className="h-5 w-5" />
-                </a>
               </div>
             </div>
           </motion.div>

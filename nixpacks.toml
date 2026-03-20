@@ -10,7 +10,7 @@
 
 # Install phase — include all workspace package.json files for pnpm resolution
 [phases.install]
-cmds = ["pnpm install --frozen-lockfile"]
+cmds = ["NODE_ENV=development pnpm install --frozen-lockfile"]
 cacheDirectories = ["node_modules", ".pnpm-store"]
 onlyIncludeFiles = [
   "package.json",

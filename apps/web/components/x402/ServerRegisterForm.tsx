@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { z } from 'zod'
+import { z } from 'zod/v3'
 import { Copy, Check, ChevronDown, Loader2 } from 'lucide-react'
 import { useSWRConfig } from 'swr'
 import { useX402Wallet } from '@/hooks/use-x402-wallet'

@@ -33,6 +33,7 @@
     "@stacks/network": "^7.2.0",
     "@stacks/transactions": "^7.2.0",
     "ai": "5.0.0-beta.6",
+    "c32check": "^2.0.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "embla-carousel-react": "^8.6.0",

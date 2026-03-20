@@ -16,6 +16,7 @@ interface ClientDescriptor {
   id: string
   name: string
   logo: string
+  logoClass?: string
   deepLink?: (name: string, url: string) => string
   command?: (name: string, url: string) => string
   jsonConfig?: (name: string, url: string) => string
@@ -27,6 +28,7 @@ const clients: ClientDescriptor[] = [
     id: 'cursor',
     name: 'Cursor',
     logo: '/logos/mcp-clients/cursor-cube.svg',
+    logoClass: 'dark:invert',
     deepLink: (name, url) => {
       const encoded = btoa(JSON.stringify({ url }))
       const safeName = name.toLowerCase().replace(/[^a-z0-9-]/g, '-')
@@ -37,6 +39,7 @@ const clients: ClientDescriptor[] = [
     id: 'claude-code',
     name: 'Claude Code',
     logo: '/logos/mcp-clients/claude.svg',
+    logoClass: 'invert dark:invert-0',
     command: (name, url) => {
       const safeName = name.toLowerCase().replace(/[^a-z0-9-]/g, '-')
       return `claude mcp add --transport http ${safeName} "${url}"`
@@ -46,6 +49,7 @@ const clients: ClientDescriptor[] = [
     id: 'claude-desktop',
     name: 'Claude Desktop',
     logo: '/logos/mcp-clients/claude.svg',
+    logoClass: 'invert dark:invert-0',
     configPath: '~/Library/Application Support/Claude/claude_desktop_config.json',
     jsonConfig: (name, url) => {
       const safeName = name.toLowerCase().replace(/[^a-z0-9-]/g, '-')
@@ -56,12 +60,14 @@ const clients: ClientDescriptor[] = [
     id: 'chatgpt',
     name: 'ChatGPT',
     logo: '/logos/mcp-clients/OpenAI-black-monoblossom.svg',
+    logoClass: 'dark:invert',
     configPath: 'Settings > Connectors > Create',
   },
   {
     id: 'zed',
     name: 'Zed',
     logo: '/logos/mcp-clients/zed-logo.svg',
+    logoClass: 'invert dark:invert-0',
     configPath: '~/.config/zed/settings.json',
     jsonConfig: (name, url) => {
       const safeName = name.toLowerCase().replace(/[^a-z0-9-]/g, '-')
@@ -216,7 +222,7 @@ export function ConnectPanel({ serverId, serverName }: ConnectPanelProps) {
           >
             <div className="flex items-center gap-3">
               <div className="flex h-7 w-7 items-center justify-center rounded bg-muted p-1">
-                <Image src={selected.logo} alt={selected.name} width={20} height={20} className="dark:invert" />
+                <Image src={selected.logo} alt={selected.name} width={20} height={20} className={selected.logoClass} />
               </div>
               <span className="text-sm font-medium">{selected.name}</span>
             </div>
@@ -235,7 +241,7 @@ export function ConnectPanel({ serverId, serverName }: ConnectPanelProps) {
                   )}
                 >
                   <div className="flex h-7 w-7 items-center justify-center rounded bg-muted p-1">
-                    <Image src={client.logo} alt={client.name} width={20} height={20} className="dark:invert" />
+                    <Image src={client.logo} alt={client.name} width={20} height={20} className={client.logoClass} />
                   </div>
                   <span className="text-sm font-medium">{client.name}</span>
                   {selectedId === client.id && <Check className="h-4 w-4 text-primary ml-auto" />}

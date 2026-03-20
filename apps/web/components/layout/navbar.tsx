@@ -55,13 +55,13 @@ export function GlobalNavbar() {
     >
       <div className="w-full px-4">
         {/* 3-col grid on desktop; flex row on mobile */}
-        <div className="flex items-center justify-between py-2 md:grid md:grid-cols-3">
+        <div className="flex items-center justify-between py-2 lg:grid lg:grid-cols-3">
 
           {/* Left: Logo */}
           <div className="flex items-center">
             <Link href="/" className="flex items-center gap-2.5">
               {/* Mobile: just icon */}
-              <div className="block md:hidden">
+              <div className="block lg:hidden">
                 <Image
                   src={safeLogoSrc}
                   alt="StacksAI"
@@ -71,7 +71,7 @@ export function GlobalNavbar() {
                 />
               </div>
               {/* Desktop: icon + wordmark */}
-              <div className="hidden md:flex items-center gap-2.5">
+              <div className="hidden lg:flex items-center gap-2.5">
                 <Image
                   src={safeLogoSrc}
                   alt="StacksAI"
@@ -86,8 +86,8 @@ export function GlobalNavbar() {
             </Link>
           </div>
 
-          {/* Center: nav links (desktop only) */}
-          <div className="hidden md:flex justify-center items-center gap-6">
+          {/* Center: nav links (lg desktop only) */}
+          <div className="hidden lg:flex justify-center items-center gap-6">
             {desktopLinks.map(({ href, label }) => (
               <Link
                 key={href}
@@ -101,19 +101,19 @@ export function GlobalNavbar() {
 
           {/* Right: actions */}
           <div className="flex items-center justify-end gap-1">
-            {/* GitHub — desktop only */}
+            {/* GitHub — large desktop only */}
             <a
               href="https://github.com/Stack-AI-MCP/stackai-x402"
               target="_blank"
               rel="noopener noreferrer"
-              className="hidden md:flex h-8 w-8 items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
+              className="hidden lg:flex h-8 w-8 items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
               aria-label="GitHub"
             >
               <Github className="h-4 w-4" />
             </a>
 
-            {/* Theme toggle — desktop only */}
-            <div className="hidden md:flex">
+            {/* Theme toggle — large desktop only */}
+            <div className="hidden lg:flex">
               <Button
                 variant="ghost"
                 size="icon"
@@ -128,14 +128,16 @@ export function GlobalNavbar() {
               </Button>
             </div>
 
-            {/* Wallet button */}
-            <WalletButton />
+            {/* Wallet button — hidden on small mobile, shown from sm up */}
+            <div className="hidden sm:block">
+              <WalletButton />
+            </div>
 
-            {/* Terminal CTA — desktop only */}
+            {/* Terminal CTA — large desktop only */}
             <Button
               asChild
               size="sm"
-              className="hidden md:flex gap-1.5 bg-foreground text-background hover:bg-foreground/90 font-mono text-[11px] tracking-wider uppercase rounded-[2px]"
+              className="hidden lg:flex gap-1.5 bg-foreground text-background hover:bg-foreground/90 font-mono text-[11px] tracking-wider uppercase rounded-[2px]"
             >
               <Link href="/chat">
                 <Terminal className="h-3 w-3" />
@@ -143,11 +145,11 @@ export function GlobalNavbar() {
               </Link>
             </Button>
 
-            {/* Mobile hamburger */}
+            {/* Hamburger menu — shown below lg */}
             <Button
               variant="ghost"
               size="icon"
-              className="md:hidden h-8 w-8"
+              className="lg:hidden h-8 w-8"
               aria-label={menuOpen ? 'Close menu' : 'Open menu'}
               onClick={() => setMenuOpen((v) => !v)}
             >
@@ -166,7 +168,7 @@ export function GlobalNavbar() {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -10 }}
             transition={{ duration: 0.2, ease: 'easeOut' }}
-            className="md:hidden border-t border-border bg-background/98 backdrop-blur-sm"
+            className="lg:hidden border-t border-border bg-background/98 backdrop-blur-sm"
           >
             <div className="px-6 py-4 space-y-2">
               {mobileLinks.map(({ href, label }) => (
@@ -196,6 +198,11 @@ export function GlobalNavbar() {
                     Terminal
                   </Button>
                 </Link>
+              </div>
+
+              {/* Wallet (visible on smallest screens via mobile menu) */}
+              <div className="sm:hidden pt-3 border-t border-border/50">
+                <WalletButton />
               </div>
 
               {/* Theme + GitHub */}

@@ -78,6 +78,18 @@ export async function handleProxy(c: Context<AppEnv>, serverId: string): Promise
   const startTime = Date.now()
   const timestamp = new Date().toISOString()
 
+  // ── Handle GET requests (SSE transport) ─────────────────────────────────
+  if (c.req.method === 'GET') {
+    // MCP SSE transport: clients issue GET to open an event stream.
+    // Our gateway is a JSON-RPC proxy, not an SSE server.
+    // Return a proper error so clients know to use streamable HTTP (POST).
+    return c.json({
+      jsonrpc: '2.0',
+      id: null,
+      error: { code: -32600, message: 'SSE transport not supported. Use streamable HTTP (POST) instead.' },
+    }, 400)
+  }
+
   // ── Parse JSON-RPC body first ────────────────────────────────────────────
   let body: JsonRpcBody
   try {
@@ -114,9 +126,63 @@ export async function handleProxy(c: Context<AppEnv>, serverId: string): Promise
 
   redis.set(`server:${serverId}:lastSeen`, new Date().toISOString(), 'EX', 2_592_000).catch(() => {})
 
+  // ── Handle MCP protocol methods (before tool lookup) ───────────────────────
+  const method = body.method
+
+  if (method === 'initialize') {
+    // Return gateway server info — no need to proxy to upstream
+    return c.json({
+      jsonrpc: '2.0',
+      id: body.id ?? 1,
+      result: {
+        protocolVersion: '2024-11-05',
+        capabilities: {
+          tools: { listChanged: false },
+        },
+        serverInfo: {
+          name: config.name ?? 'x402-gateway',
+          version: '1.0.0',
+        },
+      },
+    })
+  }
+
+  if (method === 'notifications/initialized' || method === 'initialized') {
+    // Client notification — acknowledge with empty success
+    return c.json({ jsonrpc: '2.0', id: body.id ?? null, result: {} })
+  }
+
+  if (method === 'tools/list') {
+    // Return tools from Redis — no need to proxy
+    return c.json({
+      jsonrpc: '2.0',
+      id: body.id ?? 1,
+      result: {
+        tools: tools.map((t) => ({
+          name: t.name,
+          description: t.description,
+          inputSchema: t.inputSchema ?? { type: 'object', properties: {} },
+        })),
+      },
+    })
+  }
+
+  if (method === 'resources/list' || method === 'prompts/list') {
+    // Return empty lists for unsupported protocol methods
+    return c.json({
+      jsonrpc: '2.0',
+      id: body.id ?? 1,
+      result: method === 'resources/list' ? { resources: [] } : { prompts: [] },
+    })
+  }
+
+  if (method === 'ping') {
+    return c.json({ jsonrpc: '2.0', id: body.id ?? 1, result: {} })
+  }
+
   // ── Find tool ──────────────────────────────────────────────────────────────
-  let toolName = body.method
-  if (body.method === 'tools/call' && body.params && typeof body.params === 'object') {
+  let toolName = method
+  if (method === 'tools/call' && body.params && typeof body.params === 'object') {
     toolName = (body.params as any).name
   }
 

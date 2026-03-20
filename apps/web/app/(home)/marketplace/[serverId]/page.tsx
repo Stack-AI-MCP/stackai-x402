@@ -17,7 +17,7 @@ import {
   Zap,
   ChevronRight
 } from 'lucide-react'
-import { useMemo } from 'react'
+import { useMemo, useCallback } from 'react'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { HighlighterText } from '@/components/ui/highlighter-text'
 import { ServerDetailsCard } from '@/components/x402/ServerDetailsCard'
@@ -26,6 +26,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { ToolRunnerModal, type ToolForRunner } from '@/components/x402/ToolRunnerModal'
 import { ServerFavicon } from '@/components/x402/ServerFavicon'
 import { MoltbookBadge } from '@/components/moltbook-badge'
+import { ExplorerRow, type TransactionRecord } from '@/components/explorer/explorer-row'
 import { cn, formatRelative, formatDate } from '@/lib/utils/format'
 
 const GATEWAY_URL = process.env.NEXT_PUBLIC_GATEWAY_URL ?? 'http://localhost:3001'
@@ -71,6 +72,19 @@ export default function ServerDetailsPage() {
   const { data, error, isLoading, mutate } = useSWR(
     `${GATEWAY_URL}/api/v1/servers/${serverId}`,
     fetcher
+  )
+
+  // Payments data — only fetch when payments tab is active
+  const paymentsFetcher = useCallback(async (url: string) => {
+    const res = await fetch(url)
+    if (!res.ok) throw new Error(`Gateway error: ${res.status}`)
+    return res.json() as Promise<{ transactions: TransactionRecord[], pagination: { page: number, total: number, pages: number } }>
+  }, [])
+
+  const { data: paymentsData, isLoading: paymentsLoading } = useSWR(
+    activeTab === 'payments' ? `${GATEWAY_URL}/api/v1/servers/transactions?serverId=${serverId}&limit=50` : null,
+    paymentsFetcher,
+    { revalidateOnFocus: false }
   )
 
   const filteredTools = useMemo(() => {
@@ -275,13 +289,44 @@ export default function ServerDetailsPage() {
             </TabsContent>
 
             <TabsContent value="payments" className="pt-6">
-              <div className="flex flex-col items-center justify-center py-20 text-center border-2 border-dashed border-border rounded-xl bg-muted/5">
-                <div className="rounded-full bg-primary/10 p-4 mb-4">
-                  <Coins className="h-8 w-8 text-primary" />
+              {paymentsLoading ? (
+                <div className="space-y-3">
+                  {[...Array(3)].map((_, i) => (
+                    <Skeleton key={i} className="h-14 w-full rounded-lg" />
+                  ))}
                 </div>
-                <h3 className="text-lg font-semibold mb-2">No Payments Yet</h3>
-                <p className="text-sm text-muted-foreground max-w-xs">Transaction history for this server will appear here once you start using paid tools.</p>
-              </div>
+              ) : paymentsData?.transactions && paymentsData.transactions.length > 0 ? (
+                <div className="rounded-xl border border-border overflow-hidden">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left">
+                      <thead className="bg-muted/30">
+                        <tr className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground">
+                          <th className="py-3 px-4">Status</th>
+                          <th className="py-3 px-4">Server</th>
+                          <th className="py-3 px-4">Tool</th>
+                          <th className="py-3 px-4 text-right">Amount</th>
+                          <th className="py-3 px-4">Network</th>
+                          <th className="py-3 px-4">Time</th>
+                          <th className="py-3 px-4">Tx Hash</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {paymentsData.transactions.map((tx) => (
+                          <ExplorerRow key={tx.id} tx={tx} />
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex flex-col items-center justify-center py-20 text-center border-2 border-dashed border-border rounded-xl bg-muted/5">
+                  <div className="rounded-full bg-primary/10 p-4 mb-4">
+                    <Coins className="h-8 w-8 text-primary" />
+                  </div>
+                  <h3 className="text-lg font-semibold mb-2">No Payments Yet</h3>
+                  <p className="text-sm text-muted-foreground max-w-xs">Transaction history for this server will appear here once you start using paid tools.</p>
+                </div>
+              )}
             </TabsContent>
 
             <TabsContent value="connect" className="pt-6">

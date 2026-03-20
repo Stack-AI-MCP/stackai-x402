@@ -15,6 +15,7 @@ const productLinks = [
 ]
 
 const resourceLinks = [
+  { href: 'https://x402-docs.stacks-ai.app',           label: 'DOCUMENTATION', external: true },
   { href: 'https://github.com/Stack-AI-MCP/stackai-x402', label: 'GITHUB', external: true },
   { href: 'https://stacksai.xyz',                      label: 'STACKSAI', external: true },
   { href: 'https://docs.stacks.co',                    label: 'STACKS DOCS', external: true },

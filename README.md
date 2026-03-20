@@ -1,28 +1,12 @@
-# stackai-x402
-
-x402 HTTP payment protocol implementation for Stacks Bitcoin L2. Enables AI agents and developers to monetize MCP tool calls with STX, sBTC, or USDCx payments -- no custodial intermediaries, no subscriptions, pay-per-call.
-
-![stackai-x402](apps/docs/public/images/landing-light.png)
+<div align="center">
+  <img src="brand/x402-logo.svg" alt="x402" width="200" />
+  <h1>stackai-x402</h1>
+  <p>HTTP 402 payments for AI agents on Stacks Bitcoin L2.<br/>Monetize MCP tool calls with STX, sBTC, or USDCx — no custodial intermediaries, no subscriptions, pay-per-call.</p>
+</div>
 
 ## How x402 Works
 
-```
-Client                        Gateway                     MCP Server
-  │                              │                            │
-  │── POST /mcp?id=xxx ────────>│                            │
-  │                              │── tool price > 0? ───────>│
-  │<── 402 Payment Required ────│                            │
-  │    (payment-required header) │                            │
-  │                              │                            │
-  │── sign tx locally           │                            │
-  │── retry with payment ──────>│                            │
-  │   (payment-signature header) │── settle on relay ──────>│
-  │                              │<── settlement OK ────────│
-  │                              │── forward to upstream ──>│
-  │                              │<── tool result ──────────│
-  │<── 200 + result ────────────│                            │
-  │   (payment-response header)  │                            │
-```
+<img src="brand/x402-architecture.svg" alt="x402 Payment Flow" width="100%" />
 
 1. Client calls a tool through the gateway
 2. Gateway returns HTTP 402 with a `payment-required` header (base64 JSON listing accepted tokens, price, recipient)
@@ -32,13 +16,17 @@ Client                        Gateway                     MCP Server
 
 ## Packages
 
-| Package | Path | Description |
-|---------|------|-------------|
-| [`stackai-x402`](packages/sdk/) | `packages/sdk/` | TypeScript SDK -- wallet generation, automatic 402 handling, agent management |
-| [`gateway`](apps/gateway/) | `apps/gateway/` | HTTP gateway -- MCP proxy with x402 payment enforcement, server registry |
-| [`web`](apps/web/) | `apps/web/` | Next.js dashboard -- marketplace, chat, agent composer, analytics |
-| [`docs`](apps/docs/) | `apps/docs/` | Nextra documentation site |
-| [`moltbook`](apps/moltbook/) | `apps/moltbook/` | Promotional AI agent service for the Moltbook social platform |
+<img src="brand/x402-packages.svg" alt="x402 Packages" width="100%" />
+
+## Live Services
+
+| Service | URL |
+|---------|-----|
+| Dashboard | [x402.stacks-ai.app](https://x402.stacks-ai.app) |
+| Gateway | [gateway.stacks-ai.app](https://gateway.stacks-ai.app) |
+| Moltbook | [moltbook.stacks-ai.app](https://moltbook.stacks-ai.app) |
+| Documentation | [x402-docs.stacks-ai.app](https://x402-docs.stacks-ai.app) |
+| GitHub | [Stack-AI-MCP/stackai-x402](https://github.com/Stack-AI-MCP/stackai-x402) |
 
 ## Quick Start
 
@@ -128,7 +116,7 @@ pnpm --filter web dev        # web dashboard only
 pnpm --filter stackai-x402 build  # rebuild SDK
 ```
 
-## Architecture
+## Project Structure
 
 ```
 packages/sdk/src/
@@ -159,14 +147,6 @@ apps/moltbook/src/
 apps/docs/
   src/content/  MDX documentation (guides, reference, getting started)
 ```
-
-## Supported Tokens
-
-| Token | Network | Description |
-|-------|---------|-------------|
-| STX | mainnet, testnet | Native Stacks token |
-| sBTC | mainnet, testnet | Wrapped Bitcoin on Stacks |
-| USDCx | mainnet | Circle xReserve USDC on Stacks |
 
 ## License
 

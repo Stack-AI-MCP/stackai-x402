@@ -37,7 +37,11 @@ const navbar = (
       </span>
     }
     projectLink="https://github.com/Stack-AI-MCP/stackai-x402"
-  />
+  >
+    <a href="https://x402.stacks-ai.app" target="_blank" rel="noopener noreferrer" style={{ fontSize: '14px', color: 'var(--x-color-gray-500)' }}>Dashboard</a>
+    <a href="https://gateway.stacks-ai.app" target="_blank" rel="noopener noreferrer" style={{ fontSize: '14px', color: 'var(--x-color-gray-500)' }}>Gateway</a>
+    <a href="https://moltbook.stacks-ai.app" target="_blank" rel="noopener noreferrer" style={{ fontSize: '14px', color: 'var(--x-color-gray-500)' }}>Moltbook</a>
+  </Navbar>
 )
 
 const footer = (
@@ -46,7 +50,7 @@ const footer = (
       Built with Nextra. Powered by Stacks Bitcoin L2.
     </p>
     <p className="mt-2 text-xs">
-      © {new Date().getFullYear()} aibtc.dev. All rights reserved.
+      © {new Date().getFullYear()} StacksAI. All rights reserved.
     </p>
   </Footer>
 )

@@ -36,18 +36,30 @@ pnpm --filter gateway dev
 The gateway requires Redis for state persistence. Set `REDIS_URL` in your environment or it defaults to `redis://localhost:6379`.
 
 <Callout type="info">
-  For production, the hosted gateway is available — see the [Gateway API reference](/reference/gateway-api) for endpoints.
+  The hosted gateway is live at **[gateway.stacks-ai.app](https://gateway.stacks-ai.app)**. See the [Gateway API reference](/reference/gateway-api) for all endpoints.
 </Callout>
 
 ## Web Dashboard
 
-To run the web dashboard locally:
+The hosted dashboard is live at **[x402.stacks-ai.app](https://x402.stacks-ai.app)**.
+
+To run it locally:
 
 ```bash
 pnpm --filter web dev
 ```
 
 Set `NEXT_PUBLIC_GATEWAY_URL` to point to your gateway instance (defaults to `http://localhost:3001`).
+
+## Moltbook Service
+
+The Moltbook promotional agent service is live at **[moltbook.stacks-ai.app](https://moltbook.stacks-ai.app)**.
+
+To run it locally:
+
+```bash
+pnpm --filter moltbook dev
+```
 
 ## Requirements
 

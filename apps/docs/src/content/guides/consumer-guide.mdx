@@ -1,0 +1,127 @@
+import { Callout } from 'nextra/components'
+
+# Consumer Guide
+
+This guide covers advanced usage patterns for building AI agents that pay for premium MCP tools.
+
+## The x402 Payment Flow
+
+When your agent calls a premium tool through the gateway:
+
+1. The gateway returns `HTTP 402 Payment Required` with a `payment-required` header
+2. The header contains: price, recipient address, accepted tokens, and network
+3. The SDK intercepts this response, builds a Stacks transaction, signs it locally, and broadcasts
+4. The SDK retries the original request with a `payment-response` header containing the transaction ID
+5. The gateway verifies the transaction on-chain and returns the tool result
+
+<Callout type="info">
+  The private key never leaves your agent. All signing happens locally — the gateway only sees the broadcast transaction ID.
+</Callout>
+
+## Creating an Agent Client
+
+The simplest approach — `createAgentClient` wraps axios with automatic 402 handling:
+
+```typescript
+import { createAgentClient } from 'stackai-x402'
+
+const client = createAgentClient(process.env.AGENT_PRIVATE_KEY, 'mainnet')
+
+const response = await client.post('https://gateway.example.com/mcp?id=server_123', {
+  jsonrpc: '2.0',
+  method: 'tools/call',
+  params: { name: 'premium-search', arguments: { query: 'BTC price' } },
+  id: 1,
+})
+```
+
+## Wrapping an Existing Client
+
+If you already have an axios instance with custom configuration:
+
+```typescript
+import { wrapAxiosWithPayment } from 'stackai-x402'
+import axios from 'axios'
+
+const myAxios = axios.create({
+  timeout: 60000,
+  headers: { 'X-Custom-Header': 'value' },
+})
+
+const client = wrapAxiosWithPayment(myAxios, privateKey, 'mainnet')
+```
+
+## Wallet Management
+
+### Generate a New Wallet
+
+```typescript
+import { generateAgentWallet } from 'stackai-x402'
+
+const wallet = generateAgentWallet('testnet')
+// { privateKey: '...', address: 'ST...', network: 'testnet' }
+```
+
+### Check Balance
+
+```typescript
+import { getBalance } from 'stackai-x402'
+
+const balance = await getBalance('SP1234...', 'mainnet')
+// { balance: '1000000', locked: '0', nonce: 5 }
+```
+
+The `balance` field is in micro-STX (1 STX = 1,000,000 micro-STX).
+
+## Discovering Available Agents
+
+```typescript
+import { discoverAgents } from 'stackai-x402'
+
+const agents = await discoverAgents('https://gateway.example.com')
+// { agents: [...], total: 42, page: 1, limit: 20 }
+```
+
+## Decoding Payment Headers
+
+For manual handling of 402 responses:
+
+```typescript
+import { decodePaymentRequired, decodePaymentResponse } from 'stackai-x402'
+
+// Parse the 402 challenge
+const requirement = decodePaymentRequired(response.headers['payment-required'])
+// { accepts: [{ asset: 'STX', amount: '50000', payTo: 'SP...', network: 'stacks:1' }] }
+
+// Parse the settlement confirmation
+const settlement = decodePaymentResponse(response.headers['payment-response'])
+// { txid: '0x...', accepted: { asset: 'STX', ... } }
+```
+
+## Request Hooks
+
+Attach hooks to observe every tool call:
+
+```typescript
+import { createAgentClient } from 'stackai-x402'
+import { LoggingHook } from 'stackai-x402/hooks'
+
+const client = createAgentClient(privateKey, 'mainnet', {
+  hooks: [new LoggingHook()],
+})
+```
+
+Available hooks:
+
+| Hook | Purpose |
+|------|---------|
+| `LoggingHook` | Logs tool calls and payment details to console |
+| `X402MonetizationHook` | Enforces x402 payment flow (used internally by gateway) |
+| `AnalyticsHook` | Records metrics to Redis for analytics dashboards |
+
+## Security
+
+- **Private keys** are used only for local transaction signing — never transmitted
+- **Transaction fees** are estimated automatically by the SDK
+- **Multi-token support** — the SDK selects the cheapest accepted token by default
+- **Testnet first** — always test with `'testnet'` before switching to `'mainnet'`

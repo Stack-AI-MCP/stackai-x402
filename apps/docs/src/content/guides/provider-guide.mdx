@@ -1,0 +1,145 @@
+import { Callout } from 'nextra/components'
+
+# Provider Guide
+
+Monetize your MCP server tools and manage your agents programmatically.
+
+## Overview
+
+As a provider, you:
+1. Register your MCP server's URL on the gateway
+2. Set USD prices for each tool
+3. The gateway enforces payment before proxying calls to your server
+4. Payments go directly to your wallet — the gateway never holds funds
+
+## Registering a Server
+
+Before creating agents, register your upstream MCP server:
+
+1. Go to the [Web Dashboard](/guides/web-dashboard) register page
+2. Enter your MCP server URL (must be accessible over HTTP/SSE)
+3. The gateway introspects the server to discover available tools
+4. Set pricing for each tool
+
+Or use the gateway API directly:
+
+```bash
+# Introspect to discover tools
+curl https://gateway.example.com/api/v1/servers/introspect?url=https://your-mcp-server.com
+
+# Register (requires wallet signature)
+curl -X POST https://gateway.example.com/api/v1/servers/ \
+  -H "Content-Type: application/json" \
+  -d '{ "url": "https://your-mcp-server.com", "name": "My Server", ... }'
+```
+
+## Creating Agents
+
+Agents are curated configurations on top of registered servers. An agent selects which tools to expose and at what price:
+
+```typescript
+import { createAgent } from 'stackai-x402'
+
+const agent = await createAgent(gatewayUrl, privateKey, {
+  name: 'DeFi Research Agent',
+  description: 'Real-time DeFi analytics and market data',
+  tools: [
+    { serverId: 'srv_abc', toolName: 'get-price', price: 0.01 },
+    { serverId: 'srv_abc', toolName: 'get-pools', price: 0.02 },
+    { serverId: 'srv_abc', toolName: 'health-check', price: 0 },
+  ],
+  systemPrompt: 'You are a DeFi research assistant. Use get-price for real-time data.',
+  starterPrompts: [
+    "What's the current STX price?",
+    'Show me the top DeFi pools',
+  ],
+  network: 'mainnet',
+})
+```
+
+## Managing Agents
+
+### List Your Agents
+
+```typescript
+import { listAgents } from 'stackai-x402'
+
+const result = await listAgents(gatewayUrl, { page: 1, limit: 10 })
+// { agents: [...], total: 3, page: 1, limit: 10 }
+```
+
+### Update an Agent
+
+```typescript
+import { updateAgent } from 'stackai-x402'
+
+await updateAgent(gatewayUrl, privateKey, agentId, {
+  name: 'Updated Agent Name',
+  tools: [
+    { serverId: 'srv_abc', toolName: 'search', price: 0.10 },
+  ],
+})
+```
+
+### Delete an Agent
+
+```typescript
+import { deleteAgent } from 'stackai-x402'
+
+await deleteAgent(gatewayUrl, privateKey, agentId)
+```
+
+<Callout type="warning">
+  All SDK operations that modify state (`createAgent`, `updateAgent`, `deleteAgent`) require the owner's private key for message signing authentication.
+</Callout>
+
+## Tracking Revenue
+
+View transaction history for your agents:
+
+```typescript
+import { listTransactions } from 'stackai-x402'
+
+const txns = await listTransactions(gatewayUrl, {
+  agentId: 'agent_123',
+  page: 1,
+  limit: 50,
+})
+
+for (const tx of txns.transactions) {
+  console.log(`${tx.toolName}: ${tx.amount} ${tx.token} — ${tx.status}`)
+}
+```
+
+Transaction statuses:
+- `settled` — Payment verified on-chain, tool executed successfully
+- `free` — Free tool call (price was $0)
+- `failed` — Payment verification or tool execution failed
+
+## Analytics
+
+The gateway provides per-server analytics via the dashboard and API:
+
+```bash
+GET /api/v1/servers/{serverId}/analytics
+```
+
+Returns:
+- **30-day call counts** — total, successful, failed
+- **Revenue by token** — STX, sBTC, USDCx breakdowns
+- **Unique callers** — distinct wallet addresses
+
+## Pricing Strategy
+
+Prices are set in **USD** and converted to crypto at execution time.
+
+| Approach | Price Range | Best For |
+|----------|-------------|----------|
+| Free | `$0` | Driving adoption, open-source tools |
+| Micro | `$0.001 - $0.01` | High-volume, lightweight operations |
+| Standard | `$0.01 - $0.10` | API-like tool calls (search, fetch) |
+| Premium | `$0.10+` | Compute-heavy or data-intensive tools |
+
+<Callout type="info">
+  Free tools (`price: 0`) are proxied without a 402 challenge — no wallet needed for the consumer.
+</Callout>

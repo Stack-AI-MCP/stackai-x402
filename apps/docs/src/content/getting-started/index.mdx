@@ -1,0 +1,32 @@
+import { DocCards, DocCard } from '@/components/doc-cards'
+
+# Getting Started
+
+Choose your path based on how you want to use stackai-x402.
+
+<DocCards cols={2}>
+  <DocCard
+    title="Installation"
+    description="Install the SDK and set up your environment"
+    href="/getting-started/installation"
+  />
+  <DocCard
+    title="Consumer Quick Start"
+    description="Build an AI agent that pays for premium MCP tools"
+    href="/getting-started/consumer-quickstart"
+  />
+  <DocCard
+    title="Provider Quick Start"
+    description="Monetize your MCP server tools and start earning"
+    href="/getting-started/provider-quickstart"
+  />
+</DocCards>
+
+## Roles
+
+stackai-x402 has two primary roles:
+
+- **Consumer** — An AI agent (or developer building one) that calls premium tools and pays for them automatically using a private key
+- **Provider** — A developer who runs an MCP server and wants to charge for tool usage
+
+You can be both — the SDK supports consumer and provider workflows from the same package.

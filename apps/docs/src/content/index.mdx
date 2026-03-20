@@ -1,0 +1,93 @@
+import { Callout } from 'nextra/components'
+import { DocCards, DocCard } from '@/components/doc-cards'
+import { ThemeImage } from '@/components/theme-image'
+
+# stackai-x402
+
+**HTTP 402 payments for AI agents on Stacks Bitcoin L2.**
+
+<ThemeImage lightSrc="/images/landing-light.png" darkSrc="/images/landing-dark.png" alt="stackai-x402 landing page" caption="HTTP 402 payments for AI agents on Stacks Bitcoin L2" />
+
+AI agents today are limited by their inability to pay for premium services. Traditional payment methods are slow, require human intervention, and don't scale for automated machine-to-machine interactions.
+
+**stackai-x402** solves this by implementing the HTTP 402 (Payment Required) status code using Stacks blockchain primitives — enabling any AI agent to pay for any MCP tool, automatically.
+
+## What's in the box?
+
+<DocCards cols={3}>
+  <DocCard
+    title="SDK"
+    description="TypeScript library for wallet management, automatic x402 payment flows, and agent CRUD"
+    href="/reference/sdk-api"
+  />
+  <DocCard
+    title="Gateway"
+    description="Secure proxy that monetizes any MCP server — no code changes needed on the upstream server"
+    href="/reference/gateway-api"
+  />
+  <DocCard
+    title="Web Dashboard"
+    description="Discover agents, monetize servers, chat with tools, and track analytics"
+    href="/guides/web-dashboard"
+  />
+</DocCards>
+
+## Key Features
+
+- **Bitcoin Security** — All payments settle on Stacks, anchored to Bitcoin finality
+- **Non-Intrusive** — Monetize existing MCP servers without changing a single line of their code
+- **Multi-Token** — Pay with STX, sBTC, or USDCx
+- **AI-Native** — Built specifically for the Model Context Protocol (MCP)
+- **Agent Composer** — Create custom AI agents with curated tool sets, system prompts, and starter prompts
+- **Moltbook Integration** — Promotional AI agents that post about your tools on Moltbook
+
+## How It Works
+
+```
+┌─────────────┐    1. Tool Call     ┌─────────────┐    5. Execute Tool   ┌─────────────┐
+│             │ ──────────────────▶ │             │ ──────────────────▶ │             │
+│  AI Agent   │    2. 402 Required  │  x402       │    6. Tool Result   │  MCP Server │
+│  (Consumer) │ ◀────────────────── │  Gateway    │ ◀────────────────── │  (Provider) │
+│             │    3. Pay (STX/sBTC)│             │                     │             │
+│             │ ──────────────────▶ │             │                     │             │
+│             │    4. Payment OK +  │             │                     │             │
+│             │ ◀── Tool Result ─── │             │                     │             │
+└─────────────┘                     └─────────────┘                     └─────────────┘
+                                          │
+                                    ┌─────┴─────┐
+                                    │  Stacks   │
+                                    │  Bitcoin  │
+                                    │    L2     │
+                                    └───────────┘
+```
+
+1. **Agent** calls a tool through the **Gateway**
+2. **Gateway** returns `HTTP 402 Payment Required` with price, recipient, and accepted tokens
+3. **Agent** signs and broadcasts a Stacks transaction (handled automatically by the SDK)
+4. **Gateway** verifies the transaction on-chain, executes the tool, and returns the result
+5. Payment goes directly from consumer to provider — no intermediary holds funds
+
+## Get Started
+
+<DocCards cols={2}>
+  <DocCard
+    title="Consumer Quick Start"
+    description="Build an AI agent that can pay for premium tools"
+    href="/getting-started/consumer-quickstart"
+  />
+  <DocCard
+    title="Provider Quick Start"
+    description="Monetize your MCP server and start earning"
+    href="/getting-started/provider-quickstart"
+  />
+  <DocCard
+    title="Guides"
+    description="In-depth guides for the dashboard, composer, payments, and more"
+    href="/guides"
+  />
+  <DocCard
+    title="API Reference"
+    description="Complete SDK and Gateway API documentation"
+    href="/reference"
+  />
+</DocCards>

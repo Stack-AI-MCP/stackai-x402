@@ -1,0 +1,85 @@
+# FAQ
+
+## General
+
+### What is x402?
+
+x402 refers to the HTTP 402 status code ("Payment Required"). The x402 protocol extends HTTP with a payment layer — when a server requires payment for a resource, it returns a 402 response with payment details. The client pays and retries the request with proof of payment.
+
+### What is MCP?
+
+The [Model Context Protocol (MCP)](https://modelcontextprotocol.io) is an open standard for connecting AI models to external tools and data sources. It provides a standardized way for AI agents to call tools, access resources, and interact with services.
+
+### How is stackai-x402 different from other payment solutions?
+
+- **Machine-to-machine** — Designed for AI agents, not humans clicking buttons
+- **Non-intrusive** — Monetize existing MCP servers without code changes
+- **Peer-to-peer** — Payments go directly from consumer to provider on-chain
+- **Multi-token** — STX, sBTC, and USDCx supported
+- **Bitcoin security** — All payments settle on Stacks, anchored to Bitcoin
+
+## Payments
+
+### Does the gateway hold my funds?
+
+No. Payments are peer-to-peer Stacks transactions. The gateway verifies the transaction on-chain but never touches funds. Payments go directly from the consumer's wallet to the provider's wallet.
+
+### What tokens can I pay with?
+
+- **STX** — Native Stacks token
+- **sBTC** — Wrapped Bitcoin on Stacks (backed 1:1 by BTC)
+- **USDCx** — Circle's USDC bridged to Stacks (backed 1:1 by USDC)
+
+### How are prices calculated?
+
+Tool prices are set in **USD** by the provider. The gateway converts USD to the consumer's chosen token at execution time using real-time price data.
+
+### What if a payment fails?
+
+If the transaction fails to broadcast or verify, the gateway returns an error and the tool is not executed. The consumer's SDK can retry with a new transaction.
+
+### Are there gas/transaction fees?
+
+Yes. The consumer pays standard Stacks transaction fees (typically a few cents in STX). These fees go to Stacks miners, not to the gateway or provider.
+
+## Security
+
+### Is my private key safe?
+
+Yes. Private keys are used only for local transaction signing — they are never transmitted to the gateway, provider, or any third party. All signing happens in-process (SDK) or in the browser wallet extension (dashboard).
+
+### How does authentication work?
+
+Endpoints that modify state use **message signing** — the SDK signs a message with your private key, and the gateway derives your address from the signature to verify ownership. No passwords, no API keys.
+
+### Can I use testnet?
+
+Yes. Set `network: 'testnet'` in the SDK or connect to a testnet gateway. Use the [Stacks Faucet](https://explorer.hiro.so/sandbox/faucet?chain=testnet) for free test STX.
+
+## Providers
+
+### Do I need to modify my MCP server?
+
+No. The gateway acts as a transparent proxy. Register your server URL, set prices, and the gateway handles payment enforcement. Your MCP server doesn't need any changes.
+
+### Can I have both free and paid tools?
+
+Yes. Set `price: 0` for free tools — they are proxied without a 402 challenge. Consumers don't need a wallet for free tools.
+
+### How do I withdraw my earnings?
+
+Payments are standard Stacks transactions to your wallet address. You can access your earnings directly from your wallet (Leather, Xverse, etc.) — no withdrawal process needed.
+
+## Dashboard
+
+### Which wallets are supported?
+
+The web dashboard supports **Leather** and **Xverse** wallets via [Stacks Connect](https://docs.stacks.co/stacks-connect/connect-wallet).
+
+### Can I test tools before paying?
+
+Yes. Free tools can be tested without a wallet. For premium tools, use testnet to test the full payment flow with free test tokens.
+
+### What LLM models are available in the chat?
+
+The chat terminal supports multiple models via OpenRouter, including Claude, GPT-4, and others. Select your preferred model from the model selector below the input area.

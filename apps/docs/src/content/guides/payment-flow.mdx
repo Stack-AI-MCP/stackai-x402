@@ -1,0 +1,146 @@
+import { Callout } from 'nextra/components'
+
+# Payment Flow
+
+A detailed breakdown of how the x402 payment protocol works on Stacks.
+
+## Protocol Overview
+
+The x402 protocol extends HTTP with a payment layer using the `402 Payment Required` status code. It's designed for machine-to-machine payments — no human intervention needed.
+
+### Headers
+
+| Header | Direction | Purpose |
+|--------|-----------|---------|
+| `payment-required` | Gateway → Consumer | Base64-encoded payment requirements (price, recipient, tokens) |
+| `payment-response` | Consumer → Gateway | Base64-encoded payment evidence (tx ID, accepted token) |
+
+## Step-by-Step Flow
+
+### 1. Tool Call
+
+The consumer sends a standard MCP `tools/call` request:
+
+```http
+POST /mcp?id=server_123 HTTP/1.1
+Content-Type: application/json
+
+{
+  "jsonrpc": "2.0",
+  "method": "tools/call",
+  "params": { "name": "premium-search", "arguments": { "query": "STX price" } },
+  "id": 1
+}
+```
+
+### 2. Payment Challenge
+
+If the tool has a price, the gateway responds with `402`:
+
+```http
+HTTP/1.1 402 Payment Required
+payment-required: eyJhY2NlcHRzIjpbey...
+
+{
+  "error": "Payment required",
+  "accepts": [
+    {
+      "asset": "STX",
+      "amount": "50000",
+      "payTo": "SP1234ABCD...",
+      "network": "stacks:1"
+    },
+    {
+      "asset": "sBTC",
+      "amount": "100",
+      "payTo": "SP1234ABCD...",
+      "network": "stacks:1"
+    }
+  ]
+}
+```
+
+The `payment-required` header is a base64-encoded JSON object containing:
+- `accepts` — Array of accepted payment options
+- Each option: `asset` (token type), `amount` (in smallest unit), `payTo` (recipient address), `network` (CAIP-2 chain ID)
+
+### 3. Transaction Building
+
+The SDK builds a Stacks transaction locally:
+
+- For **STX**: A standard STX transfer to the `payTo` address
+- For **sBTC**: A SIP-010 contract call to the sBTC token contract
+- For **USDCx**: A SIP-010 contract call to the USDCx token contract
+
+The transaction is signed with the consumer's private key and broadcast to the Stacks network.
+
+### 4. Payment Evidence
+
+The consumer retries the original request with payment evidence:
+
+```http
+POST /mcp?id=server_123 HTTP/1.1
+Content-Type: application/json
+payment-response: eyJ4NDAyVmVyc2lvbiI...
+
+{ ... same body as step 1 ... }
+```
+
+The `payment-response` header is base64-encoded:
+
+```json
+{
+  "x402Version": 2,
+  "accepted": {
+    "asset": "STX",
+    "amount": "50000",
+    "payTo": "SP1234ABCD...",
+    "network": "stacks:1"
+  },
+  "payload": {
+    "txid": "0xabc123..."
+  }
+}
+```
+
+### 5. Verification & Execution
+
+The gateway:
+1. Decodes the `payment-response` header
+2. Verifies the transaction exists on-chain (via Stacks API)
+3. Confirms the amount, recipient, and token match the original challenge
+4. Proxies the tool call to the upstream MCP server
+5. Returns the tool result to the consumer
+
+## Network Identifiers (CAIP-2)
+
+| Network | CAIP-2 ID |
+|---------|-----------|
+| Stacks Mainnet | `stacks:1` |
+| Stacks Testnet | `stacks:2147483648` |
+
+## Multi-Token Support
+
+The gateway and SDK support three tokens:
+
+| Token | Type | Amount Unit |
+|-------|------|-------------|
+| STX | Native | micro-STX (1 STX = 1,000,000) |
+| sBTC | SIP-010 | satoshis (1 BTC = 100,000,000) |
+| USDCx | SIP-010 | micro-USDC (1 USDC = 1,000,000) |
+
+When the consumer has multiple accepted tokens available, the SDK selects based on the consumer's balance. In the web dashboard, the user can manually choose their preferred token.
+
+## Error Cases
+
+| Scenario | HTTP Status | Error |
+|----------|-------------|-------|
+| Tool not found | 404 | Tool or server not registered |
+| Insufficient payment | 402 | Transaction amount too low |
+| Invalid transaction | 400 | Transaction doesn't match challenge |
+| Transaction not found | 400 | Transaction ID not on-chain yet |
+| Upstream server error | 502 | MCP server returned an error |
+
+<Callout type="info">
+  The gateway does **not** wait for full transaction confirmation — it checks that the transaction exists in the mempool or has been mined. This allows near-instant tool execution after payment.
+</Callout>

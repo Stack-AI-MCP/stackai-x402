@@ -1,0 +1,189 @@
+# Types
+
+TypeScript type definitions for the `stackai-x402` SDK.
+
+Available from `import type { ... } from 'stackai-x402'` or `import type { ... } from 'stackai-x402/types'`.
+
+## `AgentConfig`
+
+Full agent state returned from the gateway.
+
+```typescript
+interface AgentConfig {
+  agentId: string
+  name: string
+  description: string
+  ownerAddress: string
+  tools: AgentTool[]
+  network: 'mainnet' | 'testnet'
+  systemPrompt?: string
+  starterPrompts?: string[]
+  moltbookName?: string
+  createdAt: string
+  updatedAt: string
+}
+```
+
+## `AgentTool`
+
+A tool selection within an agent configuration.
+
+```typescript
+interface AgentTool {
+  serverId: string    // upstream MCP server ID
+  toolName: string    // tool name on the upstream server
+  price: number       // USD price per call (0 = free)
+}
+```
+
+## `CreateAgentOptions`
+
+Input for `createAgent()`.
+
+```typescript
+interface CreateAgentOptions {
+  name: string
+  description: string
+  tools: AgentTool[]
+  network?: 'mainnet' | 'testnet'
+  systemPrompt?: string
+  starterPrompts?: string[]
+  moltbookName?: string
+}
+```
+
+## `AgentListResponse`
+
+Paginated agent list.
+
+```typescript
+interface AgentListResponse {
+  agents: AgentConfig[]
+  total: number
+  page: number
+  limit: number
+}
+```
+
+## `GeneratedWallet`
+
+Result of `generateAgentWallet()`.
+
+```typescript
+interface GeneratedWallet {
+  privateKey: string
+  address: string
+  network: string
+}
+```
+
+## `StxBalance`
+
+Result of `getBalance()`.
+
+```typescript
+interface StxBalance {
+  balance: string   // micro-STX
+  locked: string    // micro-STX locked in stacking
+  nonce: number     // account nonce
+}
+```
+
+## `TransactionRecord`
+
+A single transaction record from the gateway.
+
+```typescript
+interface TransactionRecord {
+  id: string
+  status: 'settled' | 'free' | 'failed'
+  serverId: string
+  serverName: string
+  agentId?: string
+  toolName: string
+  amount: string
+  token: string
+  network: string
+  payer: string
+  txHash?: string
+  timestamp: string
+}
+```
+
+## `TransactionListResponse`
+
+Paginated transaction list.
+
+```typescript
+interface TransactionListResponse {
+  transactions: TransactionRecord[]
+  total: number
+  page: number
+  limit: number
+}
+```
+
+## `Hook`
+
+Interface for request hooks.
+
+```typescript
+interface Hook {
+  onRequest(ctx: RequestContext): Promise<void>
+}
+```
+
+## `RequestContext`
+
+Context passed to hook `onRequest` methods.
+
+```typescript
+interface RequestContext {
+  method: string
+  url: string
+  headers: Record<string, string>
+  body?: unknown
+  serverId?: string
+  toolName?: string
+  agentId?: string
+}
+```
+
+## `AxiosLike`
+
+Axios-compatible interface accepted by `wrapAxiosWithPayment`.
+
+```typescript
+type AxiosLike = {
+  interceptors: {
+    request: { use: Function }
+    response: { use: Function }
+  }
+  post: Function
+  get: Function
+}
+```
+
+## `AnalyticsDb`
+
+Interface for the analytics storage backend (used by `AnalyticsHook`).
+
+```typescript
+interface AnalyticsDb {
+  incr(key: string): Promise<number>
+  hset(key: string, field: string, value: string): Promise<number>
+  hgetall(key: string): Promise<Record<string, string>>
+}
+```
+
+## `ErrorRateAlertPayload`
+
+Callback type for analytics error rate alerts.
+
+```typescript
+type ErrorRateAlertPayload = {
+  serverId: string
+  errorRate: number
+  threshold: number
+}
+```

@@ -1,0 +1,266 @@
+import { Callout } from 'nextra/components'
+
+# SDK API Reference
+
+Complete reference for all functions exported by the `stackai-x402` package.
+
+## Main Exports
+
+These are available from the default import: `import { ... } from 'stackai-x402'`
+
+### `createAgentClient`
+
+Creates an axios instance configured to automatically handle x402 payment flows.
+
+```typescript
+function createAgentClient(
+  privateKey: string,
+  network: 'mainnet' | 'testnet',
+  options?: { hooks?: Hook[] }
+): AxiosInstance
+```
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `privateKey` | `string` | 64-char hex private key for transaction signing |
+| `network` | `'mainnet' \| 'testnet'` | Stacks network to use |
+| `options.hooks` | `Hook[]` | Optional request hooks (logging, analytics) |
+
+**Returns**: An axios instance that intercepts 402 responses and handles payment automatically.
+
+---
+
+### `generateAgentWallet`
+
+Generates a new Stacks wallet for an AI agent.
+
+```typescript
+function generateAgentWallet(
+  network?: 'mainnet' | 'testnet'
+): GeneratedWallet
+```
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `network` | `'mainnet' \| 'testnet'` | `'mainnet'` | Network for address derivation |
+
+**Returns**: `{ privateKey: string, address: string, network: string }`
+
+---
+
+### `getBalance`
+
+Fetches the STX balance for a Stacks address from the Hiro API.
+
+```typescript
+async function getBalance(
+  stxAddress: string,
+  network?: 'mainnet' | 'testnet'
+): Promise<StxBalance>
+```
+
+**Returns**: `{ balance: string, locked: string, nonce: number }`
+
+Values are in micro-STX (1 STX = 1,000,000 micro-STX).
+
+---
+
+### `discoverAgents`
+
+Lists all available agents on a gateway.
+
+```typescript
+async function discoverAgents(
+  gatewayUrl: string
+): Promise<AgentListResponse>
+```
+
+**Returns**: `{ agents: AgentConfig[], total: number, page: number, limit: number }`
+
+---
+
+## Client Exports
+
+Available from `import { ... } from 'stackai-x402/client'`
+
+### `wrapAxiosWithPayment`
+
+Wraps an existing axios instance with x402 payment handling.
+
+```typescript
+function wrapAxiosWithPayment(
+  instance: AxiosLike,
+  privateKey: string,
+  network: 'mainnet' | 'testnet'
+): AxiosLike
+```
+
+---
+
+### `decodePaymentRequired`
+
+Parses the base64-encoded `payment-required` header from a 402 response.
+
+```typescript
+function decodePaymentRequired(
+  header: string
+): PaymentRequirement
+```
+
+---
+
+### `decodePaymentResponse`
+
+Parses the base64-encoded `payment-response` header from a settled request.
+
+```typescript
+function decodePaymentResponse(
+  header: string
+): PaymentSettlement
+```
+
+---
+
+## Server Exports
+
+Available from `import { ... } from 'stackai-x402/server'`
+
+All server functions that modify state require a `privateKey` parameter for message signing authentication.
+
+### `createAgent`
+
+Registers a new agent on the gateway.
+
+```typescript
+async function createAgent(
+  gatewayUrl: string,
+  privateKey: string,
+  options: CreateAgentOptions
+): Promise<AgentConfig>
+```
+
+---
+
+### `listAgents`
+
+Lists all agents on the gateway (paginated, public).
+
+```typescript
+async function listAgents(
+  gatewayUrl: string,
+  options?: { page?: number; limit?: number }
+): Promise<AgentListResponse>
+```
+
+---
+
+### `getAgent`
+
+Fetches a single agent's configuration.
+
+```typescript
+async function getAgent(
+  gatewayUrl: string,
+  agentId: string
+): Promise<AgentConfig>
+```
+
+---
+
+### `updateAgent`
+
+Updates an existing agent's configuration.
+
+```typescript
+async function updateAgent(
+  gatewayUrl: string,
+  privateKey: string,
+  agentId: string,
+  updates: Partial<Pick<CreateAgentOptions,
+    'name' | 'description' | 'tools' | 'moltbookName' | 'systemPrompt' | 'starterPrompts'
+  >>
+): Promise<AgentConfig>
+```
+
+---
+
+### `deleteAgent`
+
+Deletes an agent from the gateway.
+
+```typescript
+async function deleteAgent(
+  gatewayUrl: string,
+  privateKey: string,
+  agentId: string
+): Promise<void>
+```
+
+---
+
+### `listTransactions`
+
+Fetches transaction history with optional filters.
+
+```typescript
+async function listTransactions(
+  gatewayUrl: string,
+  options?: {
+    page?: number
+    limit?: number
+    serverId?: string
+    agentId?: string
+  }
+): Promise<TransactionListResponse>
+```
+
+---
+
+## Hook Exports
+
+Available from `import { ... } from 'stackai-x402/hooks'`
+
+### `LoggingHook`
+
+Logs tool calls and payment details to the console.
+
+```typescript
+class LoggingHook implements Hook {
+  onRequest(ctx: RequestContext): Promise<void>
+}
+```
+
+### `X402MonetizationHook`
+
+Enforces x402 payment flow. Used internally by the gateway.
+
+```typescript
+class X402MonetizationHook implements Hook {
+  onRequest(ctx: RequestContext): Promise<void>
+}
+```
+
+### `AnalyticsHook`
+
+Records request metrics to Redis for analytics dashboards.
+
+```typescript
+class AnalyticsHook implements Hook {
+  constructor(redis: AnalyticsDb, onError?: ErrorRateAlertPayload)
+  onRequest(ctx: RequestContext): Promise<void>
+}
+```
+
+---
+
+## Subpath Exports Summary
+
+| Path | Exports |
+|------|---------|
+| `stackai-x402` | `createAgentClient`, `generateAgentWallet`, `getBalance`, `discoverAgents`, `createAgent`, `listAgents`, `getAgent`, `updateAgent`, `deleteAgent`, `listTransactions`, `wrapAxiosWithPayment`, `decodePaymentRequired`, `decodePaymentResponse` |
+| `stackai-x402/client` | `wrapAxiosWithPayment`, `wrapAxios`, `decodePaymentRequired`, `decodePaymentResponse` |
+| `stackai-x402/server` | `createAgent`, `listAgents`, `getAgent`, `updateAgent`, `deleteAgent`, `listTransactions` |
+| `stackai-x402/proxy` | `generateAgentWallet`, `getBalance`, `discoverAgents` |
+| `stackai-x402/hooks` | `LoggingHook`, `X402MonetizationHook`, `AnalyticsHook` |
+| `stackai-x402/types` | All TypeScript type definitions |
+| `stackai-x402/internal` | Internal utilities (not for public use) |

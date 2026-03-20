@@ -1,0 +1,56 @@
+import { Callout } from 'nextra/components'
+
+# Installation
+
+## SDK
+
+Install the `stackai-x402` package:
+
+```bash
+pnpm add stackai-x402
+```
+
+The SDK is a pure TypeScript package with subpath exports for different use cases:
+
+| Import Path | Purpose |
+|-------------|---------|
+| `stackai-x402` | Main entry — `createAgentClient`, `generateAgentWallet`, `createAgent`, etc. |
+| `stackai-x402/client` | Low-level consumer utilities — `wrapAxiosWithPayment`, `decodePaymentRequired` |
+| `stackai-x402/server` | Agent CRUD — `createAgent`, `listAgents`, `updateAgent`, `deleteAgent` |
+| `stackai-x402/proxy` | Wallet helpers — `generateAgentWallet`, `getBalance`, `discoverAgents` |
+| `stackai-x402/hooks` | Request hooks — `LoggingHook`, `X402MonetizationHook`, `AnalyticsHook` |
+| `stackai-x402/types` | TypeScript type definitions |
+
+## Gateway
+
+The x402 Gateway is a standalone service. To run it locally:
+
+```bash
+git clone https://github.com/aibtcdev/stackai-x402.git
+cd stackai-x402
+
+pnpm install
+pnpm --filter gateway dev
+```
+
+The gateway requires Redis for state persistence. Set `REDIS_URL` in your environment or it defaults to `redis://localhost:6379`.
+
+<Callout type="info">
+  For production, the hosted gateway is available — see the [Gateway API reference](/reference/gateway-api) for endpoints.
+</Callout>
+
+## Web Dashboard
+
+To run the web dashboard locally:
+
+```bash
+pnpm --filter web dev
+```
+
+Set `NEXT_PUBLIC_GATEWAY_URL` to point to your gateway instance (defaults to `http://localhost:3001`).
+
+## Requirements
+
+- Node.js 18+
+- pnpm 8+
+- Redis (for gateway only)

@@ -1,0 +1,289 @@
+import { Callout } from 'nextra/components'
+
+# Gateway API Reference
+
+The x402 Gateway is the central proxy that enforces payments and manages MCP server registrations.
+
+## Base URL
+
+The gateway runs on port `3001` by default. All endpoints are relative to the base URL.
+
+## Health
+
+### `GET /health`
+
+Health check endpoint.
+
+**Response**: `200 OK`
+
+```json
+{ "status": "ok" }
+```
+
+---
+
+## MCP Proxy
+
+### `POST /mcp?id={serverId}`
+
+The main entry point for MCP tool calls. Enforces x402 payment if the tool has a price.
+
+**Query Parameters**:
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `id` | `string` | The registered server ID |
+
+**Request Body**: Standard MCP JSON-RPC request
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "tools/call",
+  "params": { "name": "tool-name", "arguments": {} },
+  "id": 1
+}
+```
+
+**Responses**:
+- `200` — Tool result (free tool or payment verified)
+- `402` — Payment required (includes `payment-required` header)
+- `404` — Server or tool not found
+
+---
+
+## Servers
+
+### `GET /api/v1/servers/`
+
+List all registered servers.
+
+**Response**: `200 OK`
+
+```json
+{
+  "servers": [
+    {
+      "serverId": "srv_abc",
+      "name": "My MCP Server",
+      "url": "https://my-server.com",
+      "tools": [...],
+      "ownerAddress": "SP..."
+    }
+  ]
+}
+```
+
+### `POST /api/v1/servers/`
+
+Register a new MCP server. Requires wallet signature authentication.
+
+**Request Body**:
+
+```json
+{
+  "url": "https://my-mcp-server.com",
+  "name": "My Server",
+  "tools": [
+    { "name": "search", "price": 0.05 },
+    { "name": "summarize", "price": 0.01 }
+  ],
+  "acceptedTokens": ["STX", "sBTC", "USDCx"],
+  "network": "mainnet"
+}
+```
+
+### `GET /api/v1/servers/introspect?url={serverUrl}`
+
+Introspect an upstream MCP server to discover its available tools.
+
+**Query Parameters**:
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `url` | `string` | The MCP server URL to introspect |
+
+**Response**: `200 OK`
+
+```json
+{
+  "tools": [
+    { "name": "search", "description": "Search the web" },
+    { "name": "summarize", "description": "Summarize text" }
+  ]
+}
+```
+
+### `GET /api/v1/servers/{serverId}`
+
+Get a specific server's configuration and tools.
+
+### `PATCH /api/v1/servers/{serverId}`
+
+Update a server's pricing or accepted tokens. Requires owner signature.
+
+### `DELETE /api/v1/servers/{serverId}`
+
+Unregister a server. Requires owner signature.
+
+---
+
+## Agents
+
+### `GET /api/v1/agents/`
+
+List all agents (paginated, public).
+
+**Query Parameters**:
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `page` | `number` | `1` | Page number |
+| `limit` | `number` | `20` | Results per page |
+
+**Response**: `200 OK`
+
+```json
+{
+  "agents": [...],
+  "total": 42,
+  "page": 1,
+  "limit": 20
+}
+```
+
+### `POST /api/v1/agents/`
+
+Create a new agent. Requires wallet signature.
+
+### `GET /api/v1/agents/{agentId}`
+
+Get an agent's configuration and resolved tool list.
+
+### `PUT /api/v1/agents/{agentId}`
+
+Update an agent. Requires owner signature.
+
+### `DELETE /api/v1/agents/{agentId}`
+
+Delete an agent. Requires owner signature.
+
+---
+
+## Agent Proxy
+
+### `POST /api/v1/agent/{agentId}`
+
+Call a tool through an agent (uses the agent's pricing, not the server's base pricing).
+
+Follows the same x402 payment flow as `/mcp`.
+
+### `GET /api/v1/agent/{agentId}/tools`
+
+Get an agent's curated tool list with descriptions.
+
+---
+
+## Analytics
+
+### `GET /api/v1/servers/{serverId}/analytics`
+
+Get 30-day analytics for a server (public).
+
+**Response**: `200 OK`
+
+```json
+{
+  "totalCalls": 1250,
+  "successfulCalls": 1200,
+  "failedCalls": 50,
+  "revenue": {
+    "STX": "5000000",
+    "sBTC": "100000",
+    "USDCx": "2500000"
+  },
+  "uniqueCallers": 35
+}
+```
+
+### `GET /api/v1/servers/transactions`
+
+List all settled transactions across all servers (paginated, public).
+
+**Query Parameters**:
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `page` | `number` | Page number |
+| `limit` | `number` | Results per page |
+| `serverId` | `string` | Filter by server |
+| `agentId` | `string` | Filter by agent |
+
+---
+
+## Telegram
+
+### `GET /api/v1/telegram/status`
+
+Check if a wallet address has a linked Telegram account.
+
+### `POST /api/v1/telegram/disconnect`
+
+Unlink a Telegram account. Requires wallet signature.
+
+---
+
+## Agent Discovery
+
+### `GET /.well-known/agent.json?server={serverId}`
+
+Public agent card for a server. Returns metadata, tool list, and capabilities. Follows emerging agent discovery standards.
+
+**Response**: `200 OK`
+
+```json
+{
+  "name": "My Agent",
+  "description": "...",
+  "tools": [...],
+  "capabilities": ["x402-payments"]
+}
+```
+
+---
+
+## Admin
+
+<Callout type="warning">
+  Admin endpoints require the `X-Operator-Key` header. These are for gateway operators only.
+</Callout>
+
+### `GET /api/v1/admin/servers`
+
+List all servers with today's analytics (call count, error rate).
+
+### `PATCH /api/v1/admin/servers/{serverId}`
+
+Enable or disable a server.
+
+```json
+{ "status": "active" }
+```
+
+or
+
+```json
+{ "status": "disabled" }
+```
+
+---
+
+## Authentication
+
+Endpoints that modify state use **message signing** authentication:
+
+1. The SDK signs a message with the owner's private key
+2. The signature + message are sent in request headers
+3. The gateway derives the signer's address and verifies ownership
+
+This means **no passwords or API keys** — just your Stacks private key.

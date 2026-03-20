@@ -1,0 +1,97 @@
+import { Callout } from 'nextra/components'
+
+# Provider Quick Start
+
+Monetize your MCP server tools in minutes — no changes to your upstream server needed.
+
+## 1. Deploy Your MCP Server
+
+Ensure your MCP server is accessible over HTTP (SSE transport). The gateway will proxy requests to it.
+
+Any MCP-compatible server works — built with `@modelcontextprotocol/sdk`, custom implementations, or third-party servers.
+
+## 2. Register via the Dashboard
+
+The fastest way to register is through the [Web Dashboard](/guides/web-dashboard):
+
+1. Connect your Stacks wallet (Leather or Xverse)
+2. Enter your MCP server URL
+3. The gateway introspects your server to discover available tools
+4. Set a USD price for each tool (or leave at $0 for free tools)
+5. Click **Register**
+
+Your wallet address becomes the **owner** — all tool payments go directly to this address.
+
+## 3. Or Register via the SDK
+
+```typescript
+import { createAgent } from 'stackai-x402'
+
+const agent = await createAgent(
+  'https://your-gateway.com',
+  process.env.PROVIDER_PRIVATE_KEY,
+  {
+    name: 'Premium Search Agent',
+    description: 'AI-powered web search with real-time data',
+    tools: [
+      { serverId: 'my-server-id', toolName: 'search', price: 0.05 },
+      { serverId: 'my-server-id', toolName: 'summarize', price: 0.01 },
+      { serverId: 'my-server-id', toolName: 'health-check', price: 0 },
+    ],
+    network: 'mainnet',
+  }
+)
+
+console.log(`Agent ID: ${agent.agentId}`)
+```
+
+<Callout type="info">
+  The `serverId` is assigned when you register your upstream MCP server URL on the gateway. You can find it in the dashboard or via the `GET /api/v1/servers` endpoint.
+</Callout>
+
+## 4. How Payments Work
+
+1. A consumer calls a premium tool through the gateway
+2. The gateway returns `HTTP 402 Payment Required` with the price and your wallet address
+3. The consumer's SDK signs and broadcasts a Stacks transaction paying your address
+4. The gateway verifies the transaction on-chain
+5. The tool is executed and the result is returned
+
+**Payments are peer-to-peer** — funds go directly from consumer to provider. The gateway never holds funds.
+
+## 5. Manage Your Agent
+
+```typescript
+import { updateAgent, deleteAgent, listTransactions } from 'stackai-x402'
+
+// Update pricing
+await updateAgent(gatewayUrl, privateKey, agent.agentId, {
+  tools: [
+    { serverId: 'my-server-id', toolName: 'search', price: 0.10 },
+  ],
+})
+
+// View transaction history
+const txns = await listTransactions(gatewayUrl, {
+  agentId: agent.agentId,
+  page: 1,
+  limit: 20,
+})
+```
+
+## Pricing Strategy
+
+Prices are set in **USD** but paid in STX, sBTC, or USDCx. The gateway handles real-time conversion.
+
+| Strategy | Price | Use Case |
+|----------|-------|----------|
+| Free | `0` | Drive adoption, open-source tools |
+| Micro | `0.001 - 0.01` | High-volume, low-cost operations |
+| Standard | `0.01 - 0.10` | Most API-like tool calls |
+| Premium | `0.10+` | Compute-heavy or data-intensive tools |
+
+## Next Steps
+
+- [Provider Guide](/guides/provider-guide) — Advanced agent management, analytics, Moltbook
+- [Web Dashboard](/guides/web-dashboard) — Visual management interface
+- [Gateway API](/reference/gateway-api) — Full endpoint reference

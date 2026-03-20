@@ -1,0 +1,27 @@
+{
+  "name": "stackai-x402-docs",
+  "version": "1.0.0",
+  "description": "Documentation for stackai-x402 - HTTP 402 payments for AI agents on Stacks",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "dev": "next dev -p 3003",
+    "build": "next build",
+    "start": "next start -p 3003",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "next": "^15.1.3",
+    "nextra": "^4.0.0",
+    "nextra-theme-docs": "^4.0.0",
+    "react": "19.0.0-rc-45804af1-20241021",
+    "react-dom": "19.0.0-rc-45804af1-20241021",
+    "lucide-react": "^0.485.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.14",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.1",
+    "typescript": "^5.9.3"
+  }
+}

@@ -1,0 +1,86 @@
+import { Callout } from 'nextra/components'
+
+# Consumer Quick Start
+
+Build an AI agent that automatically pays for premium MCP tools on Stacks.
+
+## 1. Generate a Wallet
+
+Your agent needs a Stacks private key to sign payment transactions.
+
+```typescript
+import { generateAgentWallet } from 'stackai-x402'
+
+const wallet = generateAgentWallet('mainnet')
+console.log(`Address: ${wallet.address}`)
+console.log(`Private Key: ${wallet.privateKey}`)
+// Save the private key securely — you'll need it for every session
+```
+
+<Callout type="warning">
+  Store the private key securely (environment variable, secrets manager). Never commit it to source control.
+</Callout>
+
+## 2. Fund the Wallet
+
+Transfer a small amount of STX to your agent's address for tool payments and transaction fees. You can also use sBTC or USDCx depending on what the tool provider accepts.
+
+For testnet, use the [Stacks Faucet](https://explorer.hiro.so/sandbox/faucet?chain=testnet) to get free test STX.
+
+## 3. Create an Agent Client
+
+The `createAgentClient` function returns an axios instance that automatically handles the x402 payment flow:
+
+```typescript
+import { createAgentClient } from 'stackai-x402'
+
+const client = createAgentClient(process.env.AGENT_PRIVATE_KEY, 'mainnet')
+
+// Call a tool — the SDK handles 402 challenges automatically
+const response = await client.post('https://your-gateway.com/mcp?id=server_123', {
+  jsonrpc: '2.0',
+  method: 'tools/call',
+  params: {
+    name: 'premium-search',
+    arguments: { query: 'Stacks DeFi yields' }
+  },
+  id: 1,
+})
+
+console.log(response.data) // Tool result
+```
+
+When the gateway returns a `402 Payment Required` response, the SDK:
+1. Reads the `payment-required` header to get the price, recipient, and accepted tokens
+2. Builds a Stacks transaction locally
+3. Signs it with your private key
+4. Broadcasts the transaction
+5. Retries the original request with the transaction ID
+
+## 4. Check Your Balance
+
+```typescript
+import { getBalance } from 'stackai-x402'
+
+const balance = await getBalance(wallet.address, 'mainnet')
+console.log(`STX Balance: ${balance.balance}`)
+console.log(`Locked: ${balance.locked}`)
+```
+
+## 5. Wrap an Existing Axios Instance
+
+If you already have an axios instance configured (custom headers, timeouts, etc.), wrap it instead:
+
+```typescript
+import { wrapAxiosWithPayment } from 'stackai-x402'
+import axios from 'axios'
+
+const myAxios = axios.create({ timeout: 30000 })
+const client = wrapAxiosWithPayment(myAxios, process.env.AGENT_PRIVATE_KEY, 'mainnet')
+```
+
+## Next Steps
+
+- [Consumer Guide](/guides/consumer-guide) — Advanced usage, error handling, hooks
+- [Payment Flow](/guides/payment-flow) — Detailed breakdown of the x402 protocol
+- [SDK API Reference](/reference/sdk-api) — Full function signatures and types

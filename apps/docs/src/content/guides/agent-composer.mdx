@@ -1,0 +1,110 @@
+import { Callout } from 'nextra/components'
+
+# Agent Composer
+
+The Agent Composer lets you create custom AI agents with curated tool sets, system prompts, and starter prompts — all from the web dashboard.
+
+## What is an Agent?
+
+An agent in stackai-x402 is a **curated configuration** on top of one or more MCP servers. It defines:
+
+- **Name and description** — How the agent presents itself
+- **Tool selection** — Which tools from the upstream server(s) are available
+- **Pricing** — USD price per tool call (can differ from the server's base price)
+- **System prompt** — Instructions sent to the LLM to guide behavior
+- **Starter prompts** — Suggested first messages shown to users in the chat UI
+- **Model** — Which LLM model to use (Claude, GPT-4, etc.)
+
+## Creating an Agent
+
+### Via the Dashboard
+
+1. Navigate to the **Composer** page
+2. **Select a server** — Choose from registered MCP servers
+3. **Pick tools** — Select which tools to include in your agent
+4. **Set pricing** — Configure per-tool pricing in USD
+5. **Write a system prompt** — Tell the LLM how to use the tools effectively
+6. **Add starter prompts** — Create suggested conversation starters
+7. **Choose a model** — Select the LLM model
+8. **Deploy** — Your agent is live and discoverable in the marketplace
+
+### Via the SDK
+
+```typescript
+import { createAgent } from 'stackai-x402'
+
+const agent = await createAgent(gatewayUrl, privateKey, {
+  name: 'Stacks DeFi Assistant',
+  description: 'Real-time DeFi data and trading analysis for Stacks',
+  tools: [
+    { serverId: 'defi-server', toolName: 'get-stx-price', price: 0.001 },
+    { serverId: 'defi-server', toolName: 'get-pools', price: 0.005 },
+    { serverId: 'defi-server', toolName: 'swap-quote', price: 0.01 },
+  ],
+  systemPrompt: `You are a Stacks DeFi assistant. Always use get-stx-price for current
+market data before answering price questions. Use get-pools to show available
+liquidity pools. Use swap-quote for trade estimates.`,
+  starterPrompts: [
+    "What's the current STX price?",
+    'Show me the top Stacks DeFi pools',
+    'Get a swap quote for 100 STX to sBTC',
+  ],
+  network: 'mainnet',
+})
+```
+
+## System Prompt Best Practices
+
+A good system prompt tells the LLM:
+
+1. **What the agent does** — "You are a DeFi research assistant"
+2. **When to use which tool** — "Use `get-price` before answering any price question"
+3. **Response format** — "Present pool data in a table with APY, TVL, and pair columns"
+4. **Constraints** — "Never provide financial advice. Always show data sources."
+
+```
+Example:
+You are a Stacks blockchain assistant. You help users understand
+DeFi protocols on Stacks Bitcoin L2.
+
+Tools available:
+- get-stx-price: Fetch current STX market price
+- get-pools: List DeFi liquidity pools with APY
+- swap-quote: Estimate swap output for token pairs
+
+Always check prices with get-stx-price before discussing market conditions.
+Present data clearly using tables when appropriate.
+```
+
+## Tool Filtering
+
+When creating an agent in the chat UI, you can filter which tools are sent to the LLM. This is useful for:
+
+- **Focusing the agent** — Only expose relevant tools to reduce confusion
+- **Cost control** — Exclude expensive tools from agents used for basic queries
+- **Security** — Prevent the LLM from calling tools that modify state
+
+## Agent vs Server Pricing
+
+Agents can override the server's base pricing:
+
+| Scenario | Server Price | Agent Price | Consumer Pays |
+|----------|-------------|-------------|---------------|
+| Agent overrides | $0.05 | $0.10 | $0.10 |
+| Agent uses lower | $0.05 | $0.01 | $0.01 |
+| No agent (direct) | $0.05 | — | $0.05 |
+| Free agent tool | $0.05 | $0 | $0 |
+
+<Callout type="info">
+  When a consumer calls a tool through an agent, the **agent's price** is used. When calling directly through the server, the **server's base price** applies.
+</Callout>
+
+## Sharing Agents
+
+Each agent gets a unique URL that can be shared:
+
+```
+https://dashboard.example.com/chat/{serverId}?agent={base64-config}
+```
+
+The `agent` query parameter encodes the agent configuration (name, system prompt, tools, starter prompts, model). Anyone with the link can chat with your agent.

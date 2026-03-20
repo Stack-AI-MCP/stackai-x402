@@ -21,8 +21,7 @@ onlyIncludeFiles = [
   "apps/web/package.json",
   "apps/docs/package.json",
   "apps/moltbook/package.json",
-  "packages/sdk/package.json",
-  "packages/eslint-config/package.json"
+  "packages/sdk/package.json"
 ]
 
 # Build phase — turbo builds the target app + its workspace deps (topological)

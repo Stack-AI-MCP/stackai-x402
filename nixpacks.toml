@@ -4,7 +4,8 @@
 #   gateway  → APP_NAME=gateway
 #   web      → APP_NAME=stackai-x402-web
 #   docs     → APP_NAME=stackai-x402-docs
-#   moltbook → APP_NAME=moltbook
+#   moltbook    → APP_NAME=moltbook
+#   openapi-mcp → APP_NAME=openapi-mcp
 #
 # IMPORTANT: In Coolify, set "Base Directory" to / (repo root), NOT apps/<name>.
 
@@ -21,6 +22,7 @@ onlyIncludeFiles = [
   "apps/web/package.json",
   "apps/docs/package.json",
   "apps/moltbook/package.json",
+  "apps/openapi-mcp/package.json",
   "packages/sdk/package.json"
 ]
 

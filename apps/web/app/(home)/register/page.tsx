@@ -11,6 +11,7 @@ import { TelegramConnect } from '@/components/x402/TelegramConnect'
 import { useX402Wallet } from '@/hooks/use-x402-wallet'
 
 const GATEWAY_URL = process.env.NEXT_PUBLIC_GATEWAY_URL ?? 'http://localhost:3001'
+const OPENAPI_MCP_URL = process.env.NEXT_PUBLIC_OPENAPI_MCP_URL ?? 'https://openapi.stacks-ai.app'
 
 type Tab = 'mcp' | 'api'
 type Mode = null | 'monetize' | 'index'
@@ -79,9 +80,11 @@ export default function RegisterPage() {
     setLoadingTools(true)
     setTools(null)
 
-    fetch(`${GATEWAY_URL}/api/v1/servers/introspect?url=${encodeURIComponent(serverUrl.trim())}`, {
-      signal: ctrl.signal,
-    })
+    const introspectUrl = tab === 'api'
+      ? `/api/openapi-inspect?url=${encodeURIComponent(serverUrl.trim())}`
+      : `${GATEWAY_URL}/api/v1/servers/introspect?url=${encodeURIComponent(serverUrl.trim())}`
+
+    fetch(introspectUrl, { signal: ctrl.signal })
       .then((r) => r.ok ? r.json() : null)
       .then((data) => {
         setTools(Array.isArray(data?.tools) ? (data.tools as MCPToolLite[]) : [])
@@ -89,7 +92,7 @@ export default function RegisterPage() {
       })
       .catch((err) => { if (err.name !== 'AbortError') setTools([]) })
       .finally(() => setLoadingTools(false))
-  }, [urlValid, serverUrl])
+  }, [urlValid, serverUrl, tab])
 
   const handlePaste = useCallback(async () => {
     try {
@@ -133,8 +136,13 @@ export default function RegisterPage() {
     requireAuth: boolean
     authHeaders: Record<string, string>
   }) => {
+    // For OpenAPI servers, wrap with the converter proxy so the gateway sees an MCP endpoint
+    const effectiveUrl = tab === 'api'
+      ? `${OPENAPI_MCP_URL}/mcp?url=${encodeURIComponent(serverUrl.trim())}`
+      : serverUrl.trim()
+
     const body = {
-      url: serverUrl.trim(),
+      url: effectiveUrl,
       name: payload.name,
       ...(payload.description && { description: payload.description }),
       recipientAddress: payload.recipientAddress,
@@ -242,28 +250,19 @@ export default function RegisterPage() {
         ))}
       </div>
 
-      {tab === 'api' ? (
-        <div className="rounded-[2px] border border-border bg-card p-8 text-center space-y-3">
-          <p className="text-sm font-mono text-muted-foreground">REST API support coming soon.</p>
-          <p className="text-xs text-muted-foreground/60">
-            Any OpenAPI-compatible API can be converted to MCP. Switch to the MCP tab to register
-            using a gateway URL.
-          </p>
-        </div>
-      ) : (
-        <>
-          {/* URL input */}
-          <div className="space-y-3">
-            <label className="text-[11px] font-mono font-bold uppercase tracking-widest text-muted-foreground">
-              MCP SERVER URL
-            </label>
+      <>
+        {/* URL input */}
+        <div className="space-y-3">
+          <label className="text-[11px] font-mono font-bold uppercase tracking-widest text-muted-foreground">
+            {tab === 'api' ? 'OPENAPI / SWAGGER URL' : 'MCP SERVER URL'}
+          </label>
             <div className="flex flex-col sm:flex-row gap-2">
               <div className="relative flex-1">
                 <input
                   type="url"
                   value={serverUrl}
                   onChange={(e) => handleUrlChange(e.target.value)}
-                  placeholder="https://your-mcp-server.example.com"
+                  placeholder={tab === 'api' ? 'https://api.example.com/openapi.json' : 'https://your-mcp-server.example.com'}
                   className={cn(
                     'w-full h-11 px-4 pr-10 font-mono text-sm bg-background border text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 transition-colors',
                     urlValid ? 'border-foreground' : 'border-border',
@@ -385,7 +384,6 @@ export default function RegisterPage() {
             defaultDescription={serverInfo?.description ?? ''}
           />
         </>
-      )}
     </div>
   )
 }

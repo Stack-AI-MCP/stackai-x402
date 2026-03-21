@@ -25,6 +25,7 @@
 | Dashboard | [x402.stacks-ai.app](https://x402.stacks-ai.app) |
 | Gateway | [gateway.stacks-ai.app](https://gateway.stacks-ai.app) |
 | Moltbook | [moltbook.stacks-ai.app](https://moltbook.stacks-ai.app) |
+| OpenAPI → MCP | [openapi.stacks-ai.app](https://openapi.stacks-ai.app) |
 | Documentation | [x402-docs.stacks-ai.app](https://x402-docs.stacks-ai.app) |
 | GitHub | [Stack-AI-MCP/stackai-x402](https://github.com/Stack-AI-MCP/stackai-x402) |
 
@@ -111,9 +112,10 @@ The dashboard runs at `http://localhost:3002`. Set `NEXT_PUBLIC_GATEWAY_URL` to 
 
 ```bash
 pnpm dev             # start all packages in watch mode
-pnpm --filter gateway dev    # gateway only
-pnpm --filter web dev        # web dashboard only
-pnpm --filter stackai-x402 build  # rebuild SDK
+pnpm --filter gateway dev          # gateway only
+pnpm --filter web dev              # web dashboard only
+pnpm --filter openapi-mcp dev      # openapi-to-mcp converter
+pnpm --filter stackai-x402 build   # rebuild SDK
 ```
 
 ## Project Structure
@@ -143,6 +145,9 @@ apps/moltbook/src/
   moltbook/   Moltbook API client with challenge solver
   scheduler/  Heartbeat engine (configurable intervals)
   state/      Agent state management
+
+apps/openapi-mcp/src/
+  index.ts    Converts any OpenAPI/Swagger spec into MCP tools (port 3004)
 
 apps/docs/
   src/content/  MDX documentation (guides, reference, getting started)

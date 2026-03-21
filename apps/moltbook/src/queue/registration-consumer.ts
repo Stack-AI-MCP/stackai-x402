@@ -40,7 +40,15 @@ interface DeleteMessage {
   action: 'delete'
 }
 
-type QueueMessage = RegistrationMessage | ApiKeyUpdateMessage | DeleteMessage
+interface HeartbeatToggleMessage {
+  gatewayAgentId: string
+  moltbookName: string
+  heartbeatEnabled: boolean
+  heartbeatIntervalHours?: number
+  action: 'heartbeat-toggle'
+}
+
+type QueueMessage = RegistrationMessage | ApiKeyUpdateMessage | DeleteMessage | HeartbeatToggleMessage
 
 async function resolveToolDescriptions(
   tools: RegistrationMessage['tools'],
@@ -97,7 +105,9 @@ export class RegistrationConsumer {
         const [, json] = result
         const message = JSON.parse(json) as QueueMessage
 
-        if (message.action === 'update-api-key') {
+        if (message.action === 'heartbeat-toggle') {
+          await this.processHeartbeatToggle(message)
+        } else if (message.action === 'update-api-key') {
           await this.processApiKeyUpdate(message)
         } else if (message.action === 'delete') {
           await this.processDelete(message)
@@ -229,6 +239,34 @@ export class RegistrationConsumer {
     await this.agentStore.delete(agent.id)
     await this.redis.del(`moltbook:status:${msg.gatewayAgentId}`)
     log.info('agent deleted', { name: msg.moltbookName, agentId: agent.id })
+  }
+
+  private async processHeartbeatToggle(msg: HeartbeatToggleMessage): Promise<void> {
+    log.info('processing heartbeat toggle', { gatewayAgentId: msg.gatewayAgentId, enabled: msg.heartbeatEnabled })
+
+    const agents = await this.agentStore.list()
+    const agent = agents.find((a) => a.gatewayAgentId === msg.gatewayAgentId || a.moltbookName === msg.moltbookName)
+    if (!agent) {
+      log.warn('heartbeat toggle: agent not found', { gatewayAgentId: msg.gatewayAgentId })
+      return
+    }
+
+    const intervalHours = msg.heartbeatIntervalHours ?? agent.heartbeatIntervalHours
+
+    await this.agentStore.update(agent.id, {
+      heartbeatEnabled: msg.heartbeatEnabled,
+      ...(msg.heartbeatIntervalHours !== undefined && { heartbeatIntervalHours: msg.heartbeatIntervalHours }),
+    })
+
+    if (msg.heartbeatEnabled) {
+      this.engine.start(agent.id, intervalHours)
+      log.info('heartbeat resumed', { agentId: agent.id, intervalHours })
+    } else {
+      this.engine.stop(agent.id)
+      log.info('heartbeat paused', { agentId: agent.id })
+    }
+
+    await this.writeGatewayStatus(msg.gatewayAgentId, agent.id, agent.moltbookStatus ?? 'active')
   }
 
   async writeGatewayStatus(

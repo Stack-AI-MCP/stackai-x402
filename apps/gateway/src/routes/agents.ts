@@ -258,6 +258,21 @@ agentsRouter.put('/:agentId', async (c) => {
     }
   }
 
+  // Propagate heartbeatEnabled toggle to the moltbook service via Redis queue.
+  if (updates.heartbeatEnabled !== undefined && existing.moltbookName) {
+    try {
+      await (redis as any).lpush('moltbook:agent-registrations', JSON.stringify({ // eslint-disable-line @typescript-eslint/no-explicit-any
+        gatewayAgentId: agentId,
+        moltbookName: existing.moltbookName,
+        heartbeatEnabled: updates.heartbeatEnabled,
+        ...(updates.heartbeatIntervalHours !== undefined && { heartbeatIntervalHours: updates.heartbeatIntervalHours }),
+        action: 'heartbeat-toggle',
+      }))
+    } catch (err) {
+      console.error('Failed to queue heartbeat toggle:', err)
+    }
+  }
+
   return c.json(updated)
 })
 

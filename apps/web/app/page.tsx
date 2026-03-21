@@ -5,6 +5,7 @@ import { ConsumerInfo } from '@/components/landing/ConsumerInfo'
 import { DeveloperInfo } from '@/components/landing/DeveloperInfo'
 import { FAQSection } from '@/components/landing/FAQSection'
 import { TelegramSection } from '@/components/landing/TelegramSection'
+import { MoltbookSection } from '@/components/landing/MoltbookSection'
 import { Footer } from '@/components/landing/footer'
 import { ServerCard } from '@/components/x402/ServerCard'
 import { Check } from 'lucide-react'
@@ -115,6 +116,7 @@ export default function LandingPage() {
     <div className="min-h-screen bg-background">
       <Hero3D />
       <SupportedBySection />
+      <MoltbookSection />
       <ConsumerInfo />
 
       {/* Featured Servers */}

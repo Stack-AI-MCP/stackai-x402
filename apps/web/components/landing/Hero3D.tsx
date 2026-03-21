@@ -150,17 +150,23 @@ export function Hero3D() {
                 <span className="text-[10px] font-mono text-muted-foreground">{client.name}</span>
               </motion.div>
             ))}
-            {/* Stacks / sBTC pill to fill last cell */}
+            {/* Moltbook */}
             <motion.div
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.35, delay: 0.45 }}
               className="flex flex-col items-center gap-2"
             >
-              <div className="flex items-center justify-center rounded-2xl w-16 h-16 border border-border/50 bg-card shadow-sm card-hover">
-                <span className="text-2xl">₿</span>
+              <div className="flex items-center justify-center rounded-2xl w-16 h-16 border border-border/50 bg-[#1a1a2e] shadow-sm card-hover">
+                <Image
+                  src="/logos/moltbook-logo.webp"
+                  alt="Moltbook"
+                  width={36}
+                  height={36}
+                  className="object-contain rounded-lg"
+                />
               </div>
-              <span className="text-[10px] font-mono text-muted-foreground">sBTC</span>
+              <span className="text-[10px] font-mono text-muted-foreground">Moltbook</span>
             </motion.div>
           </motion.div>
         </div>
